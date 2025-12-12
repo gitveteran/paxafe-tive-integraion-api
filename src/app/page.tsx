@@ -157,7 +157,7 @@ export default function Home() {
                   <h2 className="text-xl font-semibold text-gray-900">{device.device_id}</h2>
                   <p className="text-sm text-gray-500 font-mono">{device.device_imei}</p>
                   <p className="text-xs text-gray-400 mt-2">
-                    Last update: {formatTimestamp(device.updated_at)}
+                    Last update: {formatTimestamp(new Date(device.updated_at).getTime())}
                   </p>
                 </div>
 
