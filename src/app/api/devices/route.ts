@@ -6,6 +6,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 
+// Mark this route as dynamic (required for Next.js 14+)
+// This tells Next.js to always render this route at runtime, not at build time
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     // Check if DATABASE_URL is configured
