@@ -59,10 +59,20 @@ export function transformToSensorPayload(tive: TivePayload): PaxafeSensorPayload
  * Transform Tive payload to PAXAFE location format
  */
 export function transformToLocationPayload(tive: TivePayload): PaxafeLocationPayload {
-  // Determine location source (capitalize first letter)
-  const locationSource = tive.Location.LocationMethod
-    ? tive.Location.LocationMethod.charAt(0).toUpperCase() + tive.Location.LocationMethod.slice(1)
-    : null;
+  // Determine location source (capitalize first letter, handle special cases)
+  let locationSource: string | null = null;
+  if (tive.Location.LocationMethod) {
+    const method = tive.Location.LocationMethod.toLowerCase();
+    // Handle special cases
+    if (method === 'wifi') {
+      locationSource = 'WiFi';
+    } else if (method === 'gps') {
+      locationSource = 'GPS';
+    } else {
+      // Default: capitalize first letter
+      locationSource = method.charAt(0).toUpperCase() + method.slice(1);
+    }
+  }
 
   // Determine accuracy category based on meters
   const accuracyMeters = tive.Location.Accuracy?.Meters;
@@ -146,32 +156,43 @@ function parseAddress(formattedAddress: string | null | undefined): {
   }
   
   if (parts.length >= 2) {
-    // Try to parse "City ST ZIP" or "City"
-    const cityPart = parts[1];
-    const zipMatch = cityPart.match(/(.+?)\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/);
-    if (zipMatch) {
-      locality = zipMatch[1] || null;
-      state = zipMatch[2] || null;
-      postalCode = zipMatch[3] || null;
+    locality = parts[1] || null;
+  }
+
+  if (parts.length >= 3) {
+    // Try to parse "ST ZIP" or "ST" or "ZIP"
+    const thirdPart = parts[2];
+    // Match "NY 10474" format
+    const stateZipMatch = thirdPart.match(/^([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/);
+    if (stateZipMatch) {
+      state = stateZipMatch[1] || null;
+      postalCode = stateZipMatch[2] || null;
     } else {
-      // Try to parse "City ST"
-      const stateMatch = cityPart.match(/(.+?)\s+([A-Z]{2})$/);
+      // Try just state "NY"
+      const stateMatch = thirdPart.match(/^[A-Z]{2}$/);
       if (stateMatch) {
-        locality = stateMatch[1] || null;
-        state = stateMatch[2] || null;
+        state = thirdPart;
       } else {
-        locality = cityPart || null;
+        // Try just ZIP
+        const zipMatch = thirdPart.match(/^(\d{5}(?:-\d{4})?)$/);
+        if (zipMatch) {
+          postalCode = thirdPart;
+        }
       }
     }
   }
 
-  if (parts.length >= 3) {
-    // Last part might be country or ZIP
-    const lastPart = parts[parts.length - 1];
-    if (!postalCode && /^\d{5}/.test(lastPart)) {
-      postalCode = lastPart.match(/\d{5}(?:-\d{4})?/)?.[0] || null;
-    } else if (!country && !/^\d/.test(lastPart)) {
-      country = lastPart || null;
+  if (parts.length >= 4) {
+    // Last part is usually country
+    country = parts[parts.length - 1] || null;
+    // If we didn't get postal code yet, check if it's in the country part
+    if (!postalCode && parts.length === 4) {
+      const lastPart = parts[3];
+      const zipMatch = lastPart.match(/(\d{5}(?:-\d{4})?)/);
+      if (zipMatch) {
+        postalCode = zipMatch[1];
+        country = lastPart.replace(zipMatch[0], '').trim() || null;
+      }
     }
   }
 

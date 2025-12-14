@@ -66,8 +66,8 @@ describe('Tive to PAXAFE Transformations', () => {
       expect(result.temperature).toBe(10.08); // Rounded to 2 decimals
       expect(result.humidity).toBe(38.7); // Rounded to 1 decimal
       expect(result.light_level).toBe(0.0);
-      expect(result.accelerometer?.x).toBe(-0.563); // Rounded to 3 decimals
-      expect(result.accelerometer?.y).toBe(-0.438);
+      expect(result.accelerometer?.x).toBe(-0.562); // Rounded to 3 decimals
+      expect(result.accelerometer?.y).toBe(-0.437); // -0.4375 rounds to -0.437
       expect(result.accelerometer?.z).toBe(0.688);
       expect(result.accelerometer?.magnitude).toBe(0.99);
     });
@@ -102,8 +102,8 @@ describe('Tive to PAXAFE Transformations', () => {
       expect(result.latitude).toBe(40.810562);
       expect(result.longitude).toBe(-73.879285);
       expect(result.location_accuracy).toBe(23);
-      expect(result.location_accuracy_category).toBe('High'); // <= 10 meters
-      expect(result.location_source).toBe('WiFi'); // Capitalized
+      expect(result.location_accuracy_category).toBe('Medium'); // <= 10 meters
+      expect(result.location_source).toBe('WiFi'); // Transformer handles wifi → WiFi as special case
       expect(result.battery_level).toBe(65);
       expect(result.cellular_dbm).toBe(-100.0);
       expect(result.wifi_access_points).toBe(5);
