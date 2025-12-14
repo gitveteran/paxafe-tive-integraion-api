@@ -25,9 +25,8 @@ describe('Tive Payload Validation', () => {
   });
 
   it('should reject missing DeviceId', () => {
-    const payload = { ...validPayload };
-    delete payload.DeviceId;
-    const result = validateTivePayload(payload);
+    const { DeviceId, ...payload } = validPayload;
+    const result = validateTivePayload(payload as any);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.field === 'DeviceId')).toBe(true);
   });
@@ -40,9 +39,8 @@ describe('Tive Payload Validation', () => {
   });
 
   it('should reject missing Temperature', () => {
-    const payload = { ...validPayload };
-    delete payload.Temperature;
-    const result = validateTivePayload(payload);
+    const { Temperature, ...payload } = validPayload;
+    const result = validateTivePayload(payload as any);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.field === 'Temperature')).toBe(true);
   });
@@ -105,6 +103,30 @@ describe('Tive Payload Validation', () => {
     const result = validateTivePayload(payload);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.field === 'Humidity.Percentage')).toBe(true);
+  });
+
+  it('should handle boundary temperature values', () => {
+    const minTemp = { ...validPayload, Temperature: { Celsius: -100 } };
+    const maxTemp = { ...validPayload, Temperature: { Celsius: 100 } };
+    
+    expect(validateTivePayload(minTemp).valid).toBe(true);
+    expect(validateTivePayload(maxTemp).valid).toBe(true);
+  });
+
+  it('should reject temperature outside bounds', () => {
+    const tooCold = { ...validPayload, Temperature: { Celsius: -101 } };
+    const tooHot = { ...validPayload, Temperature: { Celsius: 101 } };
+    
+    expect(validateTivePayload(tooCold).valid).toBe(false);
+    expect(validateTivePayload(tooHot).valid).toBe(false);
+  });
+
+  it('should handle edge coordinates', () => {
+    const northPole = { ...validPayload, Location: { ...validPayload.Location, Latitude: 90 } };
+    const southPole = { ...validPayload, Location: { ...validPayload.Location, Latitude: -90 } };
+    
+    expect(validateTivePayload(northPole).valid).toBe(true);
+    expect(validateTivePayload(southPole).valid).toBe(true);
   });
 });
 

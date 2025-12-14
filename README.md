@@ -230,9 +230,34 @@ For production, use a managed PostgreSQL service:
 
 ### Inngest Setup
 
-1. Create Inngest app at https://app.inngest.com
-2. Add your Vercel deployment URL to Inngest
-3. Inngest will automatically discover your functions at `/api/inngest`
+1. **Create Inngest Account**:
+   - Go to https://app.inngest.com
+   - Sign up for a free account (25K invocations/month)
+
+2. **Create an App**:
+   - Create a new app in Inngest dashboard
+   - Copy your `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`
+
+3. **Configure Environment Variables in Vercel**:
+   - Add `INNGEST_EVENT_KEY` to Vercel environment variables
+   - Add `INNGEST_SIGNING_KEY` to Vercel environment variables
+   - These are used for secure communication between Vercel and Inngest
+
+4. **Add Your Vercel URL to Inngest**:
+   - After deploying to Vercel, copy your production URL (e.g., `https://your-app.vercel.app`)
+   - In Inngest dashboard, add this URL as your app's endpoint
+   - Inngest will automatically discover your functions at `https://your-app.vercel.app/api/inngest`
+
+5. **Verify Function Registration**:
+   - Check Inngest dashboard to see your `processTiveWebhook` function
+   - Functions are automatically discovered from the `/api/inngest` route
+
+**How It Works:**
+- Inngest is a **cloud service** that calls back to your Vercel deployment
+- When you send an event via `inngest.send()`, Inngest receives it
+- Inngest then calls your `/api/inngest` endpoint to execute the function
+- This works seamlessly with Vercel's serverless functions
+- No additional infrastructure needed - Inngest handles the queue, retries, and DLQ
 
 ## Design Decisions
 

@@ -22,6 +22,11 @@ import {
 import { notifyTiveOfError } from '@/lib/notifications/tive-notification';
 import { inngest } from '@/lib/inngest/client';
 import { TivePayload } from '@/types/tive';
+import { timingSafeEqual } from 'crypto';
+import { logger } from '@/lib/logger';
+import { config } from '@/lib/config';
+import { VALIDATION } from '@/lib/constants';
+import { successResponse, errorResponse } from '@/lib/api/response';
 
 /**
  * Validate API key from request headers
@@ -29,17 +34,26 @@ import { TivePayload } from '@/types/tive';
 function validateApiKey(request: NextRequest): boolean {
   const apiKey = 
     request.headers.get('x-api-key') || 
-    request.headers.get('authorization')?.replace('Bearer ', '') ||
-    request.headers.get('authorization')?.replace('bearer ', '');
+    request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
   
-  const expectedApiKey = process.env.API_KEY;
+  const expectedApiKey = config.apiKey;
   
-  if (!expectedApiKey) {
-    console.warn('API_KEY not configured in environment variables');
+  if (!expectedApiKey || !apiKey) {
     return false;
   }
-  
-  return apiKey === expectedApiKey;
+
+  // Timing-safe comparison to prevent timing attacks
+  if (apiKey.length !== expectedApiKey.length) {
+    return false;
+  }
+
+  try {
+    const apiKeyBuffer = Buffer.from(apiKey, 'utf8');
+    const expectedBuffer = Buffer.from(expectedApiKey, 'utf8');
+    return timingSafeEqual(apiKeyBuffer, expectedBuffer);
+  } catch {
+    return false;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -48,30 +62,36 @@ export async function POST(request: NextRequest) {
   try {
     // 1. API Key validation
     if (!validateApiKey(request)) {
-      return NextResponse.json(
-        { 
-          error: 'Unauthorized', 
-          message: 'Invalid or missing API key. Provide API key via X-API-Key header or Authorization: Bearer <key>' 
-        },
-        { status: 401 }
+      return errorResponse(
+        'Unauthorized',
+        'Invalid or missing API key. Provide API key via X-API-Key header or Authorization: Bearer <key>',
+        401
       );
     }
 
-    // 2. Parse request body
+    // 2. Validate payload size
+    const contentLength = request.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > VALIDATION.MAX_PAYLOAD_SIZE) {
+      return errorResponse(
+        'Payload too large',
+        `Maximum payload size is ${VALIDATION.MAX_PAYLOAD_SIZE / 1024}KB`,
+        413
+      );
+    }
+
+    // 3. Parse request body
     let body: any;
     try {
       body = await request.json();
     } catch (error) {
-      return NextResponse.json(
-        { 
-          error: 'Invalid JSON', 
-          message: 'Request body must be valid JSON' 
-        },
-        { status: 400 }
+      return errorResponse(
+        'Invalid JSON',
+        'Request body must be valid JSON',
+        400
       );
     }
 
-    // 3. Validate payload structure and data
+    // 4. Validate payload structure and data
     const validation = validateTivePayload(body);
     
     if (!validation.valid) {
@@ -83,7 +103,10 @@ export async function POST(request: NextRequest) {
           'failed'
         );
       } catch (dbError) {
-        console.error('Failed to store invalid payload:', dbError);
+        logger.error('Failed to store invalid payload', { 
+          error: dbError instanceof Error ? dbError.message : 'Unknown',
+          payloadId: rawPayloadId 
+        });
       }
 
       // Notify Tive about validation errors
@@ -98,35 +121,34 @@ export async function POST(request: NextRequest) {
           received_at: Date.now(),
         });
       } catch (notifyError) {
-        console.error('Failed to notify Tive:', notifyError);
+        logger.error('Failed to notify Tive', { error: notifyError instanceof Error ? notifyError.message : 'Unknown' });
       }
 
       // Return validation errors immediately
-      return NextResponse.json(
-        { 
-          error: 'Validation failed', 
-          errors: validation.errors,
-          payload_id: rawPayloadId,
-        },
-        { status: 400 }
+      return errorResponse(
+        'Validation failed',
+        'Payload validation failed. See details for specific errors.',
+        400,
+        { errors: validation.errors, payload_id: rawPayloadId }
       );
     }
 
-    // 4. Store raw payload in database (audit trail)
+    // 5. Store raw payload in database (audit trail)
     try {
       rawPayloadId = await storeRawPayload(body as TivePayload, undefined, 'pending');
     } catch (dbError) {
-      console.error('Failed to store raw payload:', dbError);
-      return NextResponse.json(
-        { 
-          error: 'Database error', 
-          message: 'Failed to store payload. Please retry.',
-        },
-        { status: 503 }
+      logger.error('Failed to store raw payload', { 
+        error: dbError instanceof Error ? dbError.message : 'Unknown',
+        payloadId: rawPayloadId 
+      });
+      return errorResponse(
+        'Database error',
+        'Failed to store payload. Please retry.',
+        503
       );
     }
 
-    // 5. Check for out-of-order payloads (edge case)
+    // 6. Check for out-of-order payloads (edge case)
     let isOutOfOrder = false;
     try {
       const orderCheck = await checkAndUpdatePayloadOrder(
@@ -135,24 +157,24 @@ export async function POST(request: NextRequest) {
       );
       isOutOfOrder = orderCheck.isOutOfOrder;
       if (isOutOfOrder) {
-        console.warn(`Out-of-order payload detected for device ${body.DeviceId}`);
+        logger.warn(`Out-of-order payload detected for device ${body.DeviceId}`);
       }
     } catch (orderError) {
-      console.error('Failed to check payload order:', orderError);
+      logger.error('Failed to check payload order', { error: orderError instanceof Error ? orderError.message : 'Unknown' });
       // Continue processing even if order check fails
     }
 
-    // 6. Extract critical fields and transform for device_latest
+    // 7. Extract critical fields and transform for device_latest
     let criticalSensorPayload, criticalLocationPayload;
     try {
       criticalSensorPayload = transformToSensorPayload(body as TivePayload);
       criticalLocationPayload = transformToLocationPayload(body as TivePayload);
     } catch (transformError) {
-      console.error('Failed to transform for device_latest:', transformError);
+      logger.error('Failed to transform for device_latest', { error: transformError instanceof Error ? transformError.message : 'Unknown' });
       // Continue - device_latest update is non-critical
     }
 
-    // 7. Update device_latest synchronously (for fast dashboard queries)
+    // 8. Update device_latest synchronously (for fast dashboard queries)
     if (criticalSensorPayload && criticalLocationPayload) {
       try {
         await updateDeviceLatest(
@@ -163,12 +185,12 @@ export async function POST(request: NextRequest) {
           criticalLocationPayload
         );
       } catch (updateError) {
-        console.error('Failed to update device_latest:', updateError);
+        logger.error('Failed to update device_latest', { error: updateError instanceof Error ? updateError.message : 'Unknown' });
         // Non-critical, continue
       }
     }
 
-    // 8. Trigger Inngest event for async processing (normalization and storage)
+    // 9. Trigger Inngest event for async processing (normalization and storage)
     let inngestEventId: string | undefined;
     try {
       const event = await inngest.send({
@@ -185,10 +207,10 @@ export async function POST(request: NextRequest) {
         inngestEventId = event.ids[0];
         // Update raw payload with Inngest event ID (non-blocking)
         storeRawPayload(body as TivePayload, undefined, 'pending', inngestEventId)
-          .catch(err => console.error('Failed to update Inngest event ID:', err));
+          .catch(err => logger.error('Failed to update Inngest event ID', { error: err instanceof Error ? err.message : 'Unknown' }));
       }
     } catch (inngestError) {
-      console.error('Failed to send Inngest event:', inngestError);
+      logger.error('Failed to send Inngest event', { error: inngestError instanceof Error ? inngestError.message : 'Unknown' });
       // Update raw payload status to failed
       try {
         await storeRawPayload(
@@ -197,55 +219,48 @@ export async function POST(request: NextRequest) {
           'failed'
         );
       } catch (dbError) {
-        console.error('Failed to update raw payload status:', dbError);
+        logger.error('Failed to update raw payload status', { error: dbError instanceof Error ? dbError.message : 'Unknown' });
       }
       
-      return NextResponse.json(
-        { 
-          error: 'Processing error', 
-          message: 'Failed to queue payload for processing. Please retry.',
-          payload_id: rawPayloadId,
-        },
-        { status: 503 }
+      return errorResponse(
+        'Processing error',
+        'Failed to queue payload for processing. Please retry.',
+        503,
+        { payload_id: rawPayloadId }
       );
     }
 
-    // 9. Return success response immediately
-    return NextResponse.json({
-      success: true,
-      message: 'Payload received and queued for processing',
-      data: {
-        device_id: criticalSensorPayload?.device_id || body.DeviceName,
-        device_imei: criticalSensorPayload?.device_imei || body.DeviceId,
-        timestamp: body.EntryTimeEpoch,
-        out_of_order: isOutOfOrder,
-      },
+    // 10. Return success response immediately
+    return successResponse({
+      device_id: criticalSensorPayload?.device_id || body.DeviceName,
+      device_imei: criticalSensorPayload?.device_imei || body.DeviceId,
+      timestamp: body.EntryTimeEpoch,
+      out_of_order: isOutOfOrder,
       payload_id: rawPayloadId,
       inngest_event_id: inngestEventId,
-    }, { status: 200 });
+    }, 'Payload received and queued for processing');
 
   } catch (error) {
     // Catch-all for unexpected errors
-    console.error('Unexpected error processing webhook:', error);
+    logger.error('Unexpected error processing webhook', { error: error instanceof Error ? error.message : 'Unknown' });
     
     // Note: We can't update raw payload status here since we don't have the body
     // The error is logged and returned to the client
 
-    return NextResponse.json(
-      { 
-        error: 'Internal server error', 
-        message: error instanceof Error ? error.message : 'Unknown error occurred',
-        payload_id: rawPayloadId,
-      },
-      { status: 500 }
+    return errorResponse(
+      'Internal server error',
+      error instanceof Error ? error.message : 'Unknown error occurred',
+      500,
+      { payload_id: rawPayloadId }
     );
   }
 }
 
 // Handle unsupported methods
 export async function GET() {
-  return NextResponse.json(
-    { error: 'Method not allowed', message: 'Only POST method is supported' },
-    { status: 405 }
+  return errorResponse(
+    'Method not allowed',
+    'Only POST method is supported',
+    405
   );
 }

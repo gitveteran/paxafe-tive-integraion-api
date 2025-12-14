@@ -3,8 +3,11 @@
  * GET /api/devices
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
+import { config } from '@/lib/config';
+import { successResponse, errorResponse } from '@/lib/api/response';
 
 // Mark this route as dynamic (required for Next.js 14+)
 // This tells Next.js to always render this route at runtime, not at build time
@@ -13,13 +16,11 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     // Check if DATABASE_URL is configured
-    if (!process.env.DATABASE_URL) {
-      return NextResponse.json(
-        {
-          error: 'Database not configured',
-          message: 'DATABASE_URL environment variable is not set',
-        },
-        { status: 500 }
+    if (!config.databaseUrl) {
+      return errorResponse(
+        'Database not configured',
+        'DATABASE_URL environment variable is not set',
+        500
       );
     }
 
@@ -27,9 +28,10 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '100', 10);
 
     if (limit > 1000) {
-      return NextResponse.json(
-        { error: 'Limit cannot exceed 1000' },
-        { status: 400 }
+      return errorResponse(
+        'Invalid limit',
+        'Limit cannot exceed 1000',
+        400
       );
     }
 
@@ -55,22 +57,38 @@ export async function GET(request: NextRequest) {
       LIMIT $1
     `;
 
-    const result = await pool.query(query, [limit]);
+    // Add timeout wrapper
+    const queryPromise = pool.query(query, [limit]);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Query timeout')), 30000)
+    );
 
-    return NextResponse.json({
-      success: true,
+    const result = await Promise.race([queryPromise, timeoutPromise]) as any;
+
+    return successResponse({
       count: result.rows.length,
       devices: result.rows,
-    }, { status: 200 });
+    });
 
   } catch (error) {
-    console.error('Error fetching devices:', error);
-    return NextResponse.json(
-      {
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
+    logger.error('Error fetching devices', {
+      error: error instanceof Error ? error.message : 'Unknown',
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    
+    // Check for specific timeout errors
+    if (error instanceof Error && error.message.includes('timeout')) {
+      return errorResponse(
+        'Database timeout',
+        'Database query timed out. Please try again.',
+        503
+      );
+    }
+    
+    return errorResponse(
+      'Internal server error',
+      error instanceof Error ? error.message : 'Unknown error',
+      500
     );
   }
 }

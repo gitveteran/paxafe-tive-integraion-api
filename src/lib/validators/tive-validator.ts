@@ -4,6 +4,7 @@
  */
 
 import { TivePayload } from '@/types/tive';
+import { VALIDATION } from '@/lib/constants';
 
 export interface ValidationError {
   field: string;
@@ -44,8 +45,8 @@ export function validateTivePayload(payload: any): ValidationResult {
     // Validate timestamp is reasonable (not too far in past/future)
     const now = Date.now();
     const timestamp = payload.EntryTimeEpoch;
-    const oneYearAgo = now - (365 * 24 * 60 * 60 * 1000);
-    const oneYearFromNow = now + (365 * 24 * 60 * 60 * 1000);
+    const oneYearAgo = now - VALIDATION.MAX_TIMESTAMP_OFFSET;
+    const oneYearFromNow = now + VALIDATION.MAX_TIMESTAMP_OFFSET;
     
     if (timestamp < 0) {
       errors.push({ field: 'EntryTimeEpoch', message: 'Timestamp cannot be negative' });
@@ -68,7 +69,7 @@ export function validateTivePayload(payload: any): ValidationResult {
       errors.push({ field: 'Temperature.Celsius', message: 'Temperature.Celsius must be a number' });
     } else {
       // Validate reasonable temperature range (cold chain typically -80°C to 30°C)
-      if (payload.Temperature.Celsius < -100 || payload.Temperature.Celsius > 100) {
+      if (payload.Temperature.Celsius < VALIDATION.TEMP_MIN || payload.Temperature.Celsius > VALIDATION.TEMP_MAX) {
         errors.push({ field: 'Temperature.Celsius', message: 'Temperature.Celsius is outside reasonable range (-100 to 100)' });
       }
     }
@@ -105,8 +106,8 @@ export function validateTivePayload(payload: any): ValidationResult {
     const humidity = payload.Humidity.Percentage;
     if (typeof humidity !== 'number') {
       errors.push({ field: 'Humidity.Percentage', message: 'Humidity.Percentage must be a number' });
-    } else if (humidity < 0 || humidity > 100) {
-      errors.push({ field: 'Humidity.Percentage', message: 'Humidity.Percentage must be between 0 and 100' });
+    } else if (humidity < VALIDATION.HUMIDITY_MIN || humidity > VALIDATION.HUMIDITY_MAX) {
+      errors.push({ field: 'Humidity.Percentage', message: `Humidity.Percentage must be between ${VALIDATION.HUMIDITY_MIN} and ${VALIDATION.HUMIDITY_MAX}` });
     }
   }
 

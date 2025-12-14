@@ -6,6 +6,7 @@ import { inngest } from './client';
 import { transformToSensorPayload, transformToLocationPayload } from '@/lib/transformers/tive-to-paxafe';
 import { saveTelemetry, saveLocation, updateRawPayloadStatus } from '@/lib/db';
 import { TivePayload } from '@/types/tive';
+import { logger } from '@/lib/logger';
 
 /**
  * Process Tive webhook payload
@@ -60,7 +61,10 @@ export const processTiveWebhook = inngest.createFunction(
         await updateRawPayloadStatus(raw_id, 'completed');
       } catch (error) {
         // Non-critical, log but don't fail
-        console.error('Failed to update raw payload status:', error);
+        logger.error('Failed to update raw payload status', {
+          error: error instanceof Error ? error.message : 'Unknown',
+          raw_id,
+        });
       }
     });
 

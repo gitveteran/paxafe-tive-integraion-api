@@ -6,12 +6,13 @@
 import { Pool, PoolClient } from 'pg';
 import { PaxafeSensorPayload, PaxafeLocationPayload } from '@/types/paxafe';
 import { TivePayload } from '@/types/tive';
+import { logger } from '@/lib/logger';
+import { config } from '@/lib/config';
 
 // Helper function to determine if SSL is needed
 function getSslConfig() {
   const dbUrl = process.env.DATABASE_URL || '';
-  
-  // Always use SSL for cloud providers (Supabase, Neon, etc.)
+
   if (dbUrl.includes('supabase') || 
       dbUrl.includes('neon.tech') || 
       dbUrl.includes('railway') ||
@@ -19,21 +20,34 @@ function getSslConfig() {
       process.env.NODE_ENV === 'production') {
     return { rejectUnauthorized: false };
   }
-  
-  // Local development - no SSL
+
   return false;
 }
 
 // Initialize connection pool
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: config.databaseUrl, // Use config instead
   ssl: getSslConfig(),
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 10000, 
 });
 
-// Export pool for reuse in other modules
+
+pool.on('error', (err) => {
+  logger.error('Unexpected database pool error', {
+    error: err.message,
+  });
+});
+
+pool.on('connect', (client) => {
+  logger.debug('New database client connected', {
+    totalCount: pool.totalCount,
+    idleCount: pool.idleCount,
+  });
+});
+
+
 export { pool };
 
 /**
@@ -64,7 +78,10 @@ export async function storeRawPayload(
     const result = await pool.query(query, values);
     return result.rows[0].id;
   } catch (error) {
-    console.error('Error storing raw payload:', error);
+    logger.error('Error storing raw payload', {
+      error: error instanceof Error ? error.message : 'Unknown',
+      payload: JSON.stringify(payload),
+    });
     throw new Error(`Failed to store raw payload: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
@@ -129,7 +146,10 @@ export async function saveTelemetry(payload: PaxafeSensorPayload): Promise<numbe
     const result = await pool.query(query, values);
     return result.rows[0].id;
   } catch (error) {
-    console.error('Error saving telemetry:', error);
+    logger.error('Error saving telemetry', {
+      error: error instanceof Error ? error.message : 'Unknown',
+      payload: JSON.stringify(payload),
+    });
     throw new Error(`Failed to save telemetry: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
@@ -196,7 +216,10 @@ export async function saveLocation(payload: PaxafeLocationPayload): Promise<numb
     const result = await pool.query(query, values);
     return result.rows[0].id;
   } catch (error) {
-    console.error('Error saving location:', error);
+    logger.error('Error saving location', {
+      error: error instanceof Error ? error.message : 'Unknown',
+      payload: JSON.stringify(payload),
+    });
     throw new Error(`Failed to save location: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
@@ -256,7 +279,12 @@ export async function updateDeviceLatest(
   try {
     await pool.query(query, values);
   } catch (error) {
-    console.error('Error updating device_latest:', error);
+    logger.error('Error updating device_latest', {
+      error: error instanceof Error ? error.message : 'Unknown',
+      deviceImei,
+      deviceId,
+      timestamp,
+    });
     // Don't throw - this is non-critical for webhook processing
   }
 }
@@ -360,4 +388,45 @@ export async function getClient(): Promise<PoolClient> {
  */
 export async function closePool(): Promise<void> {
   await pool.end();
+}
+
+/**
+ * Execute multiple operations in a transaction
+ */
+export async function withTransaction<T>(
+  callback: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Add health check function
+ */
+export async function checkDatabaseHealth(): Promise<boolean> {
+  try {
+    await pool.query('SELECT 1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Add metrics export
+export function getPoolStats() {
+  return {
+    totalCount: pool.totalCount,
+    idleCount: pool.idleCount,
+    waitingCount: pool.waitingCount,
+  };
 }

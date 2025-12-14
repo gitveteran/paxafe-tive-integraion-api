@@ -39,16 +39,26 @@ export default function Home() {
   const fetchDevices = async () => {
     try {
       setLoading(true);
+      setError(null); // Clear previous errors
       const response = await fetch('/api/devices?limit=50');
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
       const data = await response.json();
       
-      if (data.success) {
-        setDevices(data.devices);
-        setError(null);
+      // Handle both response structures (data.data.devices or data.devices)
+      const devicesArray = data.data?.devices || data.devices || [];
+      
+      if (data.success && Array.isArray(devicesArray)) {
+        setDevices(devicesArray);
       } else {
-        setError(data.message || 'Failed to fetch devices');
+        setDevices([]);
+        setError(data.message || data.error || 'Failed to fetch devices');
       }
     } catch (err) {
+      setDevices([]); // Always ensure devices is an array
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
@@ -141,13 +151,13 @@ export default function Home() {
           </div>
         </div>
 
-        {devices.length === 0 ? (
+        {Array.isArray(devices) && devices.length === 0 ? (
           <div className="bg-white rounded-lg shadow p-8 text-center">
             <p className="text-gray-600">No devices found. Send some webhook payloads to see device states.</p>
           </div>
         ) : (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {devices.map((device) => (
+            {Array.isArray(devices) && devices.map((device) => (
               <div
                 key={device.device_imei}
                 className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow"

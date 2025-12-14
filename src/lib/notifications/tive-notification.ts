@@ -3,6 +3,9 @@
  * Only notifies for validation errors (Tive's responsibility)
  */
 
+import { logger } from '@/lib/logger';
+import { config } from '@/lib/config';
+
 export interface TiveErrorNotification {
   payload_id: string;
   device_id: string;
@@ -36,9 +39,9 @@ export async function notifyTiveOfError(
     return; // Don't spam Tive with our internal issues
   }
 
-  const tiveWebhookUrl = process.env.TIVE_ERROR_WEBHOOK_URL;
+  const tiveWebhookUrl = config.tiveErrorWebhookUrl;
   if (!tiveWebhookUrl) {
-    console.warn('TIVE_ERROR_WEBHOOK_URL not configured - skipping notification');
+    logger.warn('TIVE_ERROR_WEBHOOK_URL not configured - skipping notification');
     return;
   }
 
@@ -56,11 +59,16 @@ export async function notifyTiveOfError(
     });
 
     if (!response.ok) {
-      console.error(`Failed to notify Tive: ${response.status} ${response.statusText}`);
+      logger.error('Failed to notify Tive', {
+        status: response.status,
+        statusText: response.statusText,
+      });
     }
   } catch (error) {
     // Log but don't fail - notification is best-effort
-    console.error('Failed to notify Tive:', error);
+    logger.error('Failed to notify Tive', {
+      error: error instanceof Error ? error.message : 'Unknown',
+    });
   }
 }
 

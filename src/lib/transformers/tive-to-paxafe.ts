@@ -4,6 +4,7 @@
 
 import { TivePayload } from '@/types/tive';
 import { PaxafeSensorPayload, PaxafeLocationPayload } from '@/types/paxafe';
+import { ACCURACY_CATEGORIES } from '@/lib/constants';
 
 /**
  * Transform Tive payload to PAXAFE sensor format
@@ -78,9 +79,9 @@ export function transformToLocationPayload(tive: TivePayload): PaxafeLocationPay
   const accuracyMeters = tive.Location.Accuracy?.Meters;
   let accuracyCategory: "High" | "Medium" | "Low" | null = null;
   if (accuracyMeters !== null && accuracyMeters !== undefined) {
-    if (accuracyMeters <= 10) {
+    if (accuracyMeters <= ACCURACY_CATEGORIES.HIGH_THRESHOLD) {
       accuracyCategory = "High";
-    } else if (accuracyMeters <= 100) {
+    } else if (accuracyMeters <= ACCURACY_CATEGORIES.MEDIUM_THRESHOLD) {
       accuracyCategory = "Medium";
     } else {
       accuracyCategory = "Low";
