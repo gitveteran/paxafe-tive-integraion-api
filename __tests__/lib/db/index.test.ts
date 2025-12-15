@@ -48,7 +48,6 @@ import {
   saveTelemetry,
   saveLocation,
   updateDeviceLatest,
-  checkAndUpdatePayloadOrder,
   checkDatabaseHealth,
   getPoolStats,
   withTransaction,
@@ -105,7 +104,7 @@ describe('Database Functions', () => {
   });
 
   describe('saveTelemetry', () => {
-    it('should save telemetry with UPSERT', async () => {
+    it('should save telemetry as new record', async () => {
       const payload: PaxafeSensorPayload = {
         device_id: 'A571992',
         device_imei: '863257063350583',
@@ -128,34 +127,14 @@ describe('Database Functions', () => {
 
       expect(result).toBe(1);
       expect(mockPool.query).toHaveBeenCalledWith(
-        expect.stringContaining('ON CONFLICT'),
+        expect.stringContaining('INSERT INTO telemetry'),
         expect.arrayContaining([payload.device_imei, payload.timestamp])
       );
-    });
-  });
-
-  describe('checkAndUpdatePayloadOrder', () => {
-    it('should detect out-of-order payloads', async () => {
-      mockPool.query
-        .mockResolvedValueOnce({
-          rows: [{ last_timestamp: 1000, out_of_order_count: 0 }],
-        })
-        .mockResolvedValueOnce({ rows: [] });
-
-      const result = await checkAndUpdatePayloadOrder('123', 500);
-
-      expect(result.isOutOfOrder).toBe(true);
-      expect(result.lastTimestamp).toBe(1000);
-    });
-
-    it('should handle first payload for device', async () => {
-      mockPool.query
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] });
-
-      const result = await checkAndUpdatePayloadOrder('123', 1000);
-
-      expect(result.isOutOfOrder).toBe(false);
+      // Should NOT contain ON CONFLICT anymore
+      expect(mockPool.query).toHaveBeenCalledWith(
+        expect.not.stringContaining('ON CONFLICT'),
+        expect.anything()
+      );
     });
   });
 

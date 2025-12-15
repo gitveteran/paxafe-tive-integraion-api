@@ -19,7 +19,8 @@ jest.mock('@/lib/db', () => ({
   pool: { query: jest.fn() },
   storeRawPayload: jest.fn(),
   updateDeviceLatest: jest.fn(),
-  checkAndUpdatePayloadOrder: jest.fn(),
+  saveTelemetry: jest.fn(),
+  saveLocation: jest.fn(),
 }));
 
 jest.mock('@/lib/inngest/client', () => ({
@@ -67,12 +68,11 @@ describe('POST /api/webhook/tive', () => {
   });
 
   it('should return 200 when payload is valid', async () => {
-    const { storeRawPayload, updateDeviceLatest, checkAndUpdatePayloadOrder } = require('@/lib/db');
+    const { storeRawPayload, updateDeviceLatest } = require('@/lib/db');
     const { inngest } = require('@/lib/inngest/client');
     
     storeRawPayload.mockResolvedValue(1);
     updateDeviceLatest.mockResolvedValue(undefined);
-    checkAndUpdatePayloadOrder.mockResolvedValue({ isOutOfOrder: false, lastTimestamp: null });
     inngest.send.mockResolvedValue({ ids: ['evt_123'] });
 
     const request = new NextRequest('http://localhost:3000/api/webhook/tive', {
@@ -174,41 +174,13 @@ describe('POST /api/webhook/tive', () => {
     expect(data.error).toBe('Database error');
   });
 
-  it('should handle out-of-order payloads', async () => {
-    const { storeRawPayload, updateDeviceLatest, checkAndUpdatePayloadOrder } = require('@/lib/db');
-    const { inngest } = require('@/lib/inngest/client');
-    
-    storeRawPayload.mockResolvedValue(1);
-    updateDeviceLatest.mockResolvedValue(undefined);
-    checkAndUpdatePayloadOrder.mockResolvedValue({ 
-      isOutOfOrder: true, 
-      lastTimestamp: validPayload.EntryTimeEpoch + 1000 
-    });
-    inngest.send.mockResolvedValue({ ids: ['evt_123'] });
-
-    const request = new NextRequest('http://localhost:3000/api/webhook/tive', {
-      method: 'POST',
-      body: JSON.stringify(validPayload),
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': 'test-api-key',
-      },
-    });
-
-    const response = await POST(request);
-    const data = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(data.data.out_of_order).toBe(true);
-  });
 
   it('should accept API key via Authorization header', async () => {
-    const { storeRawPayload, updateDeviceLatest, checkAndUpdatePayloadOrder } = require('@/lib/db');
+    const { storeRawPayload, updateDeviceLatest } = require('@/lib/db');
     const { inngest } = require('@/lib/inngest/client');
     
     storeRawPayload.mockResolvedValue(1);
     updateDeviceLatest.mockResolvedValue(undefined);
-    checkAndUpdatePayloadOrder.mockResolvedValue({ isOutOfOrder: false, lastTimestamp: null });
     inngest.send.mockResolvedValue({ ids: ['evt_123'] });
 
     const request = new NextRequest('http://localhost:3000/api/webhook/tive', {

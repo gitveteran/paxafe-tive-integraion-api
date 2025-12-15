@@ -6,9 +6,9 @@
  * stores raw payload, and triggers Inngest for async processing.
  * 
  * Architecture:
- * - Critical events (values outside normal ranges): Update device_latest synchronously for immediate alerts
- * - Normal events: Update device_latest asynchronously via Inngest
- * - All events: Save to normalized tables (telemetry, locations) asynchronously via Inngest
+ * - Critical events: Save telemetry, locations, and device_latest synchronously for immediate alerts
+ *   (Still sends to Inngest for raw payload status update, but skips duplicate saves)
+ * - Normal events: Save telemetry, locations, and device_latest asynchronously via Inngest
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -17,7 +17,8 @@ import { transformToSensorPayload, transformToLocationPayload } from '@/lib/tran
 import {
   storeRawPayload,
   updateDeviceLatest,
-  checkAndUpdatePayloadOrder,
+  saveTelemetry,
+  saveLocation,
 } from '@/lib/db';
 import { notifyTiveOfError } from '@/lib/notifications/tive-notification';
 import { inngest } from '@/lib/inngest/client';
@@ -149,21 +150,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 6. Check for out-of-order payloads (edge case)
-    let isOutOfOrder = false;
-    try {
-      const orderCheck = await checkAndUpdatePayloadOrder(
-        body.DeviceId,
-        body.EntryTimeEpoch
-      );
-      isOutOfOrder = orderCheck.isOutOfOrder;
-      if (isOutOfOrder) {
-        logger.warn(`Out-of-order payload detected for device ${body.DeviceId}`);
-      }
-    } catch (orderError) {
-      logger.error('Failed to check payload order', { error: orderError instanceof Error ? orderError.message : 'Unknown' });
-      // Continue processing even if order check fails
-    }
 
     // 7. Check for critical events (values outside normal operating ranges)
     const criticalCheck = isCriticalEvent(body as TivePayload);
@@ -178,15 +164,27 @@ export async function POST(request: NextRequest) {
     }
 
     // 8. Update device_latest conditionally based on criticality
+    let criticalTelemetryId: number | undefined;
+    let criticalLocationId: number | undefined;
+    
     if (criticalCheck.isCritical && criticalSensorPayload && criticalLocationPayload) {
-      // CRITICAL EVENT: Update device_latest synchronously for immediate dashboard alerts
+      // CRITICAL EVENT: Save telemetry and location synchronously, then update device_latest
+      // This ensures immediate dashboard alerts for critical events
       try {
+        const [telemetryId, locationId] = await Promise.all([
+          saveTelemetry(criticalSensorPayload),
+          saveLocation(criticalLocationPayload),
+        ]);
+        
+        criticalTelemetryId = telemetryId;
+        criticalLocationId = locationId;
+        
         await updateDeviceLatest(
           criticalSensorPayload.device_imei,
           criticalSensorPayload.device_id,
           body.EntryTimeEpoch,
-          criticalSensorPayload,
-          criticalLocationPayload
+          telemetryId,
+          locationId
         );
         logger.warn('Critical event: device_latest updated synchronously', {
           device_id: body.DeviceId,
@@ -197,7 +195,7 @@ export async function POST(request: NextRequest) {
           error: updateError instanceof Error ? updateError.message : 'Unknown',
           device_id: body.DeviceId,
         });
-        // Continue - still process via Inngest
+        // Continue - still process via Inngest as fallback
       }
     }
     // Note: Normal events will update device_latest asynchronously via Inngest
@@ -211,6 +209,10 @@ export async function POST(request: NextRequest) {
           raw_id: rawPayloadId,
           payload: body as TivePayload,
           timestamp: Date.now(),
+          is_critical: criticalCheck.isCritical,
+          // If critical event was saved synchronously, pass IDs to avoid duplicate saves
+          telemetry_id: criticalTelemetryId,
+          location_id: criticalLocationId,
         },
       });
       
@@ -247,7 +249,6 @@ export async function POST(request: NextRequest) {
       device_id: criticalSensorPayload?.device_id || body.DeviceName,
       device_imei: criticalSensorPayload?.device_imei || body.DeviceId,
       timestamp: body.EntryTimeEpoch,
-      out_of_order: isOutOfOrder,
       is_critical: criticalCheck.isCritical,
       critical_reasons: criticalCheck.isCritical ? criticalCheck.reasons : undefined,
       payload_id: rawPayloadId,

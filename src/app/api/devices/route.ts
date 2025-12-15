@@ -37,40 +37,42 @@ export async function GET(request: NextRequest) {
 
     const query = `
       SELECT 
-        device_imei,
-        device_id,
-        provider,
-        last_ts,
-        -- Sensor data
-        last_temperature,
-        last_humidity,
-        last_light_level,
-        last_accelerometer_x,
-        last_accelerometer_y,
-        last_accelerometer_z,
-        last_accelerometer_magnitude,
-        -- Location data
-        last_lat,
-        last_lon,
-        last_altitude,
-        location_accuracy,
-        location_accuracy_category,
-        location_source,
-        address_street,
-        address_locality,
-        address_state,
-        address_country,
-        address_postal_code,
-        address_full_address,
-        -- Device status
-        battery_level,
-        cellular_dbm,
-        cellular_network_type,
-        cellular_operator,
-        wifi_access_points,
-        updated_at
-      FROM device_latest
-      ORDER BY updated_at DESC
+        dl.device_imei,
+        dl.device_id,
+        dl.provider,
+        dl.last_ts,
+        -- Sensor data from telemetry
+        t.temperature as last_temperature,
+        t.humidity as last_humidity,
+        t.light_level as last_light_level,
+        t.accelerometer_x as last_accelerometer_x,
+        t.accelerometer_y as last_accelerometer_y,
+        t.accelerometer_z as last_accelerometer_z,
+        t.accelerometer_magnitude as last_accelerometer_magnitude,
+        -- Location data from locations
+        l.latitude as last_lat,
+        l.longitude as last_lon,
+        l.altitude as last_altitude,
+        l.location_accuracy,
+        l.location_accuracy_category,
+        l.location_source,
+        l.address_street,
+        l.address_locality,
+        l.address_state,
+        l.address_country,
+        l.address_postal_code,
+        l.address_full_address,
+        -- Device status from location
+        l.battery_level,
+        l.cellular_dbm,
+        l.cellular_network_type,
+        l.cellular_operator,
+        l.wifi_access_points,
+        dl.updated_at
+      FROM device_latest dl
+      LEFT JOIN telemetry t ON dl.latest_telemetry_id = t.id
+      LEFT JOIN locations l ON dl.latest_location_id = l.id
+      ORDER BY dl.updated_at DESC
       LIMIT $1
     `;
 

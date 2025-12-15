@@ -107,7 +107,7 @@ export async function updateRawPayloadStatus(
 
 /**
  * Save telemetry reading to normalized table
- * Uses UPSERT to handle duplicates
+ * Stores all readings as historical data (allows duplicates with same timestamp)
  */
 export async function saveTelemetry(payload: PaxafeSensorPayload): Promise<number> {
   const query = `
@@ -116,14 +116,6 @@ export async function saveTelemetry(payload: PaxafeSensorPayload): Promise<numbe
       temperature, humidity, light_level,
       accelerometer_x, accelerometer_y, accelerometer_z, accelerometer_magnitude
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-    ON CONFLICT (device_imei, ts) DO UPDATE SET
-      temperature = EXCLUDED.temperature,
-      humidity = EXCLUDED.humidity,
-      light_level = EXCLUDED.light_level,
-      accelerometer_x = EXCLUDED.accelerometer_x,
-      accelerometer_y = EXCLUDED.accelerometer_y,
-      accelerometer_z = EXCLUDED.accelerometer_z,
-      accelerometer_magnitude = EXCLUDED.accelerometer_magnitude
     RETURNING id
   `;
 
@@ -156,7 +148,7 @@ export async function saveTelemetry(payload: PaxafeSensorPayload): Promise<numbe
 
 /**
  * Save location reading to normalized table
- * Uses UPSERT to handle duplicates
+ * Stores all readings as historical data (allows duplicates with same timestamp)
  */
 export async function saveLocation(payload: PaxafeLocationPayload): Promise<number> {
   const query = `
@@ -169,21 +161,6 @@ export async function saveLocation(payload: PaxafeLocationPayload): Promise<numb
       battery_level, cellular_dbm, cellular_network_type, cellular_operator,
       wifi_access_points
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-    ON CONFLICT (device_imei, ts) DO UPDATE SET
-      latitude = EXCLUDED.latitude,
-      longitude = EXCLUDED.longitude,
-      location_accuracy = EXCLUDED.location_accuracy,
-      location_accuracy_category = EXCLUDED.location_accuracy_category,
-      location_source = EXCLUDED.location_source,
-      address_street = EXCLUDED.address_street,
-      address_locality = EXCLUDED.address_locality,
-      address_state = EXCLUDED.address_state,
-      address_country = EXCLUDED.address_country,
-      address_postal_code = EXCLUDED.address_postal_code,
-      address_full_address = EXCLUDED.address_full_address,
-      battery_level = EXCLUDED.battery_level,
-      cellular_dbm = EXCLUDED.cellular_dbm,
-      wifi_access_points = EXCLUDED.wifi_access_points
     RETURNING id
   `;
 
@@ -225,98 +202,40 @@ export async function saveLocation(payload: PaxafeLocationPayload): Promise<numb
 }
 
 /**
- * Update device_latest table with latest state (complete snapshot)
+ * Update device_latest table with references to latest telemetry and location records
  * Can be called synchronously (critical events) or asynchronously (normal events)
- * This is optimized for dashboard queries with complete device information
+ * This stores references instead of duplicating data, reducing storage and ensuring consistency
  */
 export async function updateDeviceLatest(
   deviceImei: string,
   deviceId: string,
   timestamp: number,
-  sensorPayload: PaxafeSensorPayload,
-  locationPayload: PaxafeLocationPayload
+  telemetryId: number,
+  locationId: number
 ): Promise<void> {
   const query = `
     INSERT INTO device_latest (
       device_imei, device_id, provider, last_ts,
-      -- Sensor data
-      last_temperature, last_humidity, last_light_level,
-      last_accelerometer_x, last_accelerometer_y, last_accelerometer_z, last_accelerometer_magnitude,
-      -- Location data
-      last_lat, last_lon, last_altitude,
-      location_accuracy, location_accuracy_category, location_source,
-      address_street, address_locality, address_state, address_country, address_postal_code, address_full_address,
-      -- Device status
-      battery_level, cellular_dbm, cellular_network_type, cellular_operator, wifi_access_points,
+      latest_telemetry_id, latest_location_id,
       updated_at
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, CURRENT_TIMESTAMP
+      $1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP
     )
     ON CONFLICT (device_imei) DO UPDATE SET
       device_id = EXCLUDED.device_id,
       last_ts = EXCLUDED.last_ts,
-      -- Sensor data
-      last_temperature = EXCLUDED.last_temperature,
-      last_humidity = EXCLUDED.last_humidity,
-      last_light_level = EXCLUDED.last_light_level,
-      last_accelerometer_x = EXCLUDED.last_accelerometer_x,
-      last_accelerometer_y = EXCLUDED.last_accelerometer_y,
-      last_accelerometer_z = EXCLUDED.last_accelerometer_z,
-      last_accelerometer_magnitude = EXCLUDED.last_accelerometer_magnitude,
-      -- Location data
-      last_lat = EXCLUDED.last_lat,
-      last_lon = EXCLUDED.last_lon,
-      last_altitude = EXCLUDED.last_altitude,
-      location_accuracy = EXCLUDED.location_accuracy,
-      location_accuracy_category = EXCLUDED.location_accuracy_category,
-      location_source = EXCLUDED.location_source,
-      address_street = EXCLUDED.address_street,
-      address_locality = EXCLUDED.address_locality,
-      address_state = EXCLUDED.address_state,
-      address_country = EXCLUDED.address_country,
-      address_postal_code = EXCLUDED.address_postal_code,
-      address_full_address = EXCLUDED.address_full_address,
-      -- Device status
-      battery_level = EXCLUDED.battery_level,
-      cellular_dbm = EXCLUDED.cellular_dbm,
-      cellular_network_type = EXCLUDED.cellular_network_type,
-      cellular_operator = EXCLUDED.cellular_operator,
-      wifi_access_points = EXCLUDED.wifi_access_points,
+      latest_telemetry_id = EXCLUDED.latest_telemetry_id,
+      latest_location_id = EXCLUDED.latest_location_id,
       updated_at = CURRENT_TIMESTAMP
   `;
 
   const values = [
     deviceImei,
     deviceId,
-    sensorPayload.provider,
+    'Tive', // provider
     timestamp,
-    // Sensor data
-    sensorPayload.temperature,
-    sensorPayload.humidity,
-    sensorPayload.light_level,
-    sensorPayload.accelerometer?.x ?? null,
-    sensorPayload.accelerometer?.y ?? null,
-    sensorPayload.accelerometer?.z ?? null,
-    sensorPayload.accelerometer?.magnitude ?? null,
-    // Location data
-    locationPayload.latitude,
-    locationPayload.longitude,
-    locationPayload.altitude,
-    locationPayload.location_accuracy,
-    locationPayload.location_accuracy_category,
-    locationPayload.location_source,
-    locationPayload.address?.street ?? null,
-    locationPayload.address?.locality ?? null,
-    locationPayload.address?.state ?? null,
-    locationPayload.address?.country ?? null,
-    locationPayload.address?.postal_code ?? null,
-    locationPayload.address?.full_address ?? null,
-    // Device status
-    locationPayload.battery_level,
-    locationPayload.cellular_dbm,
-    locationPayload.cellular_network_type,
-    locationPayload.cellular_operator,
-    locationPayload.wifi_access_points,
+    telemetryId,
+    locationId,
   ];
 
   try {
@@ -330,57 +249,6 @@ export async function updateDeviceLatest(
     });
     // Don't throw - this is non-critical for webhook processing
   }
-}
-
-/**
- * Check for out-of-order payloads (edge case handling)
- */
-export async function checkAndUpdatePayloadOrder(
-  deviceImei: string,
-  timestamp: number
-): Promise<{ isOutOfOrder: boolean; lastTimestamp: number | null }> {
-  // Get last timestamp for this device
-  const getQuery = `
-    SELECT last_timestamp, out_of_order_count
-    FROM payload_order_tracking
-    WHERE device_imei = $1
-  `;
-
-  const getResult = await pool.query(getQuery, [deviceImei]);
-  
-  if (getResult.rows.length === 0) {
-    // First payload for this device
-    await pool.query(
-      `INSERT INTO payload_order_tracking (device_imei, last_timestamp) VALUES ($1, $2)
-       ON CONFLICT (device_imei) DO UPDATE SET last_timestamp = $2`,
-      [deviceImei, timestamp]
-    );
-    return { isOutOfOrder: false, lastTimestamp: null };
-  }
-
-  const lastTimestamp = getResult.rows[0].last_timestamp;
-  const isOutOfOrder = lastTimestamp && timestamp < lastTimestamp;
-
-  if (isOutOfOrder) {
-    // Increment out-of-order count
-    await pool.query(
-      `UPDATE payload_order_tracking 
-       SET out_of_order_count = out_of_order_count + 1,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE device_imei = $1`,
-      [deviceImei]
-    );
-  } else {
-    // Update last timestamp
-    await pool.query(
-      `UPDATE payload_order_tracking 
-       SET last_timestamp = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE device_imei = $2`,
-      [timestamp, deviceImei]
-    );
-  }
-
-  return { isOutOfOrder: isOutOfOrder || false, lastTimestamp };
 }
 
 /**
