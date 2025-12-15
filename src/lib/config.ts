@@ -2,6 +2,9 @@
  * Validate and export configuration
  * Provides graceful degradation in development, strict validation in production
  */
+
+import { logger } from './logger';
+
 function requireEnv(key: string): string {
   const value = process.env[key];
   if (!value) {
@@ -10,7 +13,10 @@ function requireEnv(key: string): string {
     if (process.env.NODE_ENV === 'production') {
       throw error;
     }
-    console.warn(`⚠️  ${error.message} - using placeholder value`);
+    logger.warn('Missing environment variable - using placeholder', {
+      key,
+      message: error.message,
+    });
     return `placeholder-${key}`;
   }
   return value;
@@ -36,7 +42,9 @@ try {
   } as const;
 } catch (error) {
   // This should only happen in production if required vars are missing
-  console.error('❌ Configuration validation failed:', error);
+  logger.error('Configuration validation failed', {
+    error: error instanceof Error ? error.message : 'Unknown error',
+  });
   throw error;
 }
 

@@ -24,20 +24,23 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
+// TypeScript type assertion: we know databaseUrl is defined after the check above
+const dbUrl: string = databaseUrl;
+
 // Create a direct database connection for migration
 const pool = new Pool({
-  connectionString: databaseUrl,
-  ssl: databaseUrl.includes('supabase') || 
-       databaseUrl.includes('neon.tech') || 
-       databaseUrl.includes('railway') ||
-       databaseUrl.includes('sslmode=require')
+  connectionString: dbUrl,
+  ssl: dbUrl.includes('supabase') || 
+       dbUrl.includes('neon.tech') || 
+       dbUrl.includes('railway') ||
+       dbUrl.includes('sslmode=require')
     ? { rejectUnauthorized: false }
     : false,
 });
 
 async function resetDatabase() {
   console.log('⚠️  WARNING: This will delete ALL data from the database!');
-  console.log(`Connecting to database: ${databaseUrl.replace(/:[^:@]+@/, ':****@')}`);
+  console.log(`Connecting to database: ${dbUrl.replace(/:[^:@]+@/, ':****@')}`);
   console.log('');
   
   try {
