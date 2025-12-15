@@ -58,14 +58,16 @@ export function isCriticalEvent(payload: TivePayload): CriticalEventResult {
   // Check accelerometer magnitude (high movement/shock detection)
   if (payload.Accelerometer) {
     const accel = payload.Accelerometer;
-    if (accel.X !== null && accel.Y !== null && accel.Z !== null) {
+    if (typeof accel.X === 'number' && 
+        typeof accel.Y === 'number' && 
+        typeof accel.Z === 'number') {
       const magnitude = Math.sqrt(
         Math.pow(accel.X, 2) + Math.pow(accel.Y, 2) + Math.pow(accel.Z, 2)
       );
       if (magnitude > OPERATIONAL_RANGES.ACCELEROMETER_MAGNITUDE.MAX) {
         reasons.push(`High movement detected: ${magnitude.toFixed(2)}g (max: ${OPERATIONAL_RANGES.ACCELEROMETER_MAGNITUDE.MAX}g)`);
       }
-    } else if (accel.G !== null && accel.G > OPERATIONAL_RANGES.ACCELEROMETER_MAGNITUDE.MAX) {
+    } else if (typeof accel.G === 'number' && accel.G > OPERATIONAL_RANGES.ACCELEROMETER_MAGNITUDE.MAX) {
       reasons.push(`High movement detected: ${accel.G}g (max: ${OPERATIONAL_RANGES.ACCELEROMETER_MAGNITUDE.MAX}g)`);
     }
   }
