@@ -88,6 +88,7 @@ export async function storeRawPayload(
 
 /**
  * Update raw payload status after processing
+ * Preserves inngest_event_id if it was already set
  */
 export async function updateRawPayloadStatus(
   payloadId: number,
@@ -99,10 +100,37 @@ export async function updateRawPayloadStatus(
     SET status = $1,
         processed_at = CURRENT_TIMESTAMP,
         processing_error = $2
+        -- inngest_event_id is preserved (not updated, keeps existing value)
     WHERE id = $3
   `;
 
   await pool.query(query, [status, processingError || null, payloadId]);
+}
+
+/**
+ * Update inngest_event_id for a raw payload
+ * Used when Inngest event is created after initial payload storage
+ */
+export async function updateRawPayloadInngestEventId(
+  payloadId: number,
+  inngestEventId: string
+): Promise<void> {
+  const query = `
+    UPDATE raw_webhook_payloads
+    SET inngest_event_id = $1
+    WHERE id = $2
+  `;
+
+  try {
+    await pool.query(query, [inngestEventId, payloadId]);
+  } catch (error) {
+    logger.error('Error updating raw payload inngest_event_id', {
+      error: error instanceof Error ? error.message : 'Unknown',
+      payloadId,
+      inngestEventId,
+    });
+    throw error;
+  }
 }
 
 /**

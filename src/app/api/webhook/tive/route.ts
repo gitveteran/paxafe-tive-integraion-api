@@ -16,6 +16,7 @@ import { transformToSensorPayload, transformToLocationPayload } from '@/lib/tran
 import {
   storeRawPayload,
   updateDeviceLatestCritical,
+  updateRawPayloadInngestEventId,
 } from '@/lib/db';
 import { notifyTiveOfError } from '@/lib/notifications/tive-notification';
 import { inngest } from '@/lib/inngest/client';
@@ -204,9 +205,9 @@ export async function POST(request: NextRequest) {
     })
       .then((event) => {
         // Update raw payload with Inngest event ID (non-blocking)
-        if (event && event.ids && event.ids.length > 0) {
+        if (event && event.ids && event.ids.length > 0 && rawPayloadId) {
           const inngestEventId = event.ids[0];
-          storeRawPayload(body as TivePayload, undefined, 'pending', inngestEventId)
+          updateRawPayloadInngestEventId(rawPayloadId, inngestEventId)
             .catch(err => logger.error('Failed to update Inngest event ID', { 
               error: err instanceof Error ? err.message : 'Unknown',
               payload_id: rawPayloadId,
