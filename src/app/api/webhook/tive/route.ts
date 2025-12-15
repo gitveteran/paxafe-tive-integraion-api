@@ -3,11 +3,12 @@
  * POST /api/webhook/tive
  * 
  * Receives Tive IoT device telemetry payloads, validates them,
- * stores raw payload, updates device_latest, and triggers Inngest for async processing.
+ * stores raw payload, and triggers Inngest for async processing.
  * 
  * Architecture:
- * - Fast synchronous path: validation + raw storage + device_latest update
- * - Async path: Inngest handles transformation and normalized storage
+ * - Critical events (values outside normal ranges): Update device_latest synchronously for immediate alerts
+ * - Normal events: Update device_latest asynchronously via Inngest
+ * - All events: Save to normalized tables (telemetry, locations) asynchronously via Inngest
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -16,7 +17,6 @@ import { transformToSensorPayload, transformToLocationPayload } from '@/lib/tran
 import {
   storeRawPayload,
   updateDeviceLatest,
-  extractCriticalFields,
   checkAndUpdatePayloadOrder,
 } from '@/lib/db';
 import { notifyTiveOfError } from '@/lib/notifications/tive-notification';
@@ -27,6 +27,7 @@ import { logger } from '@/lib/logger';
 import { config } from '@/lib/config';
 import { VALIDATION } from '@/lib/constants';
 import { successResponse, errorResponse } from '@/lib/api/response';
+import { isCriticalEvent } from '@/lib/utils/critical-detector';
 
 /**
  * Validate API key from request headers
@@ -164,18 +165,21 @@ export async function POST(request: NextRequest) {
       // Continue processing even if order check fails
     }
 
-    // 7. Extract critical fields and transform for device_latest
+    // 7. Check for critical events (values outside normal operating ranges)
+    const criticalCheck = isCriticalEvent(body as TivePayload);
     let criticalSensorPayload, criticalLocationPayload;
+    
     try {
       criticalSensorPayload = transformToSensorPayload(body as TivePayload);
       criticalLocationPayload = transformToLocationPayload(body as TivePayload);
     } catch (transformError) {
-      logger.error('Failed to transform for device_latest', { error: transformError instanceof Error ? transformError.message : 'Unknown' });
-      // Continue - device_latest update is non-critical
+      logger.error('Failed to transform payload', { error: transformError instanceof Error ? transformError.message : 'Unknown' });
+      // Continue - transformation errors are handled
     }
 
-    // 8. Update device_latest synchronously (for fast dashboard queries)
-    if (criticalSensorPayload && criticalLocationPayload) {
+    // 8. Update device_latest conditionally based on criticality
+    if (criticalCheck.isCritical && criticalSensorPayload && criticalLocationPayload) {
+      // CRITICAL EVENT: Update device_latest synchronously for immediate dashboard alerts
       try {
         await updateDeviceLatest(
           criticalSensorPayload.device_imei,
@@ -184,11 +188,19 @@ export async function POST(request: NextRequest) {
           criticalSensorPayload,
           criticalLocationPayload
         );
+        logger.warn('Critical event: device_latest updated synchronously', {
+          device_id: body.DeviceId,
+          reasons: criticalCheck.reasons,
+        });
       } catch (updateError) {
-        logger.error('Failed to update device_latest', { error: updateError instanceof Error ? updateError.message : 'Unknown' });
-        // Non-critical, continue
+        logger.error('Failed to update device_latest (critical)', { 
+          error: updateError instanceof Error ? updateError.message : 'Unknown',
+          device_id: body.DeviceId,
+        });
+        // Continue - still process via Inngest
       }
     }
+    // Note: Normal events will update device_latest asynchronously via Inngest
 
     // 9. Trigger Inngest event for async processing (normalization and storage)
     let inngestEventId: string | undefined;
@@ -236,6 +248,8 @@ export async function POST(request: NextRequest) {
       device_imei: criticalSensorPayload?.device_imei || body.DeviceId,
       timestamp: body.EntryTimeEpoch,
       out_of_order: isOutOfOrder,
+      is_critical: criticalCheck.isCritical,
+      critical_reasons: criticalCheck.isCritical ? criticalCheck.reasons : undefined,
       payload_id: rawPayloadId,
       inngest_event_id: inngestEventId,
     }, 'Payload received and queued for processing');

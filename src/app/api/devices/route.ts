@@ -41,15 +41,32 @@ export async function GET(request: NextRequest) {
         device_id,
         provider,
         last_ts,
+        -- Sensor data
         last_temperature,
+        last_humidity,
+        last_light_level,
+        last_accelerometer_x,
+        last_accelerometer_y,
+        last_accelerometer_z,
+        last_accelerometer_magnitude,
+        -- Location data
         last_lat,
         last_lon,
+        last_altitude,
         location_accuracy,
         location_accuracy_category,
         location_source,
+        address_street,
+        address_locality,
+        address_state,
+        address_country,
+        address_postal_code,
         address_full_address,
+        -- Device status
         battery_level,
         cellular_dbm,
+        cellular_network_type,
+        cellular_operator,
         wifi_access_points,
         updated_at
       FROM device_latest

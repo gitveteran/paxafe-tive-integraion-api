@@ -81,21 +81,39 @@ CREATE INDEX idx_location_coordinates ON locations(latitude, longitude);
 CREATE INDEX idx_location_provider ON locations(provider);
 
 -- Device latest state table (optimized for dashboard queries)
--- Updated synchronously on every webhook for fast dashboard reads
+-- Contains complete device snapshot for fast dashboard queries
+-- Updated synchronously for critical events, asynchronously for normal events
 CREATE TABLE IF NOT EXISTS device_latest (
   device_imei VARCHAR(15) PRIMARY KEY,
   device_id VARCHAR(255) NOT NULL,
   provider VARCHAR(50) NOT NULL DEFAULT 'Tive',
   last_ts BIGINT NOT NULL,
+  -- Sensor data (from telemetry)
   last_temperature DECIMAL(5, 2),
+  last_humidity DECIMAL(4, 1),
+  last_light_level DECIMAL(8, 1),
+  last_accelerometer_x DECIMAL(6, 3),
+  last_accelerometer_y DECIMAL(6, 3),
+  last_accelerometer_z DECIMAL(6, 3),
+  last_accelerometer_magnitude DECIMAL(6, 3),
+  -- Location data (from locations)
   last_lat DECIMAL(10, 8),
   last_lon DECIMAL(11, 8),
+  last_altitude DECIMAL(8, 2),
   location_accuracy INTEGER,
   location_accuracy_category VARCHAR(10),
   location_source VARCHAR(50),
+  address_street TEXT,
+  address_locality VARCHAR(255),
+  address_state VARCHAR(100),
+  address_country VARCHAR(100),
+  address_postal_code VARCHAR(20),
   address_full_address TEXT,
+  -- Device status
   battery_level INTEGER,
   cellular_dbm DECIMAL(6, 2),
+  cellular_network_type VARCHAR(50),
+  cellular_operator VARCHAR(100),
   wifi_access_points INTEGER,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

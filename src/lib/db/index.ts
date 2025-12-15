@@ -225,8 +225,9 @@ export async function saveLocation(payload: PaxafeLocationPayload): Promise<numb
 }
 
 /**
- * Update device_latest table with latest state (synchronous, fast)
- * This is optimized for dashboard queries
+ * Update device_latest table with latest state (complete snapshot)
+ * Can be called synchronously (critical events) or asynchronously (normal events)
+ * This is optimized for dashboard queries with complete device information
  */
 export async function updateDeviceLatest(
   deviceImei: string,
@@ -238,23 +239,48 @@ export async function updateDeviceLatest(
   const query = `
     INSERT INTO device_latest (
       device_imei, device_id, provider, last_ts,
-      last_temperature, last_lat, last_lon,
+      -- Sensor data
+      last_temperature, last_humidity, last_light_level,
+      last_accelerometer_x, last_accelerometer_y, last_accelerometer_z, last_accelerometer_magnitude,
+      -- Location data
+      last_lat, last_lon, last_altitude,
       location_accuracy, location_accuracy_category, location_source,
-      address_full_address, battery_level, cellular_dbm, wifi_access_points,
+      address_street, address_locality, address_state, address_country, address_postal_code, address_full_address,
+      -- Device status
+      battery_level, cellular_dbm, cellular_network_type, cellular_operator, wifi_access_points,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, CURRENT_TIMESTAMP
+    )
     ON CONFLICT (device_imei) DO UPDATE SET
       device_id = EXCLUDED.device_id,
       last_ts = EXCLUDED.last_ts,
+      -- Sensor data
       last_temperature = EXCLUDED.last_temperature,
+      last_humidity = EXCLUDED.last_humidity,
+      last_light_level = EXCLUDED.last_light_level,
+      last_accelerometer_x = EXCLUDED.last_accelerometer_x,
+      last_accelerometer_y = EXCLUDED.last_accelerometer_y,
+      last_accelerometer_z = EXCLUDED.last_accelerometer_z,
+      last_accelerometer_magnitude = EXCLUDED.last_accelerometer_magnitude,
+      -- Location data
       last_lat = EXCLUDED.last_lat,
       last_lon = EXCLUDED.last_lon,
+      last_altitude = EXCLUDED.last_altitude,
       location_accuracy = EXCLUDED.location_accuracy,
       location_accuracy_category = EXCLUDED.location_accuracy_category,
       location_source = EXCLUDED.location_source,
+      address_street = EXCLUDED.address_street,
+      address_locality = EXCLUDED.address_locality,
+      address_state = EXCLUDED.address_state,
+      address_country = EXCLUDED.address_country,
+      address_postal_code = EXCLUDED.address_postal_code,
       address_full_address = EXCLUDED.address_full_address,
+      -- Device status
       battery_level = EXCLUDED.battery_level,
       cellular_dbm = EXCLUDED.cellular_dbm,
+      cellular_network_type = EXCLUDED.cellular_network_type,
+      cellular_operator = EXCLUDED.cellular_operator,
       wifi_access_points = EXCLUDED.wifi_access_points,
       updated_at = CURRENT_TIMESTAMP
   `;
@@ -264,15 +290,32 @@ export async function updateDeviceLatest(
     deviceId,
     sensorPayload.provider,
     timestamp,
+    // Sensor data
     sensorPayload.temperature,
+    sensorPayload.humidity,
+    sensorPayload.light_level,
+    sensorPayload.accelerometer?.x ?? null,
+    sensorPayload.accelerometer?.y ?? null,
+    sensorPayload.accelerometer?.z ?? null,
+    sensorPayload.accelerometer?.magnitude ?? null,
+    // Location data
     locationPayload.latitude,
     locationPayload.longitude,
+    locationPayload.altitude,
     locationPayload.location_accuracy,
     locationPayload.location_accuracy_category,
     locationPayload.location_source,
+    locationPayload.address?.street ?? null,
+    locationPayload.address?.locality ?? null,
+    locationPayload.address?.state ?? null,
+    locationPayload.address?.country ?? null,
+    locationPayload.address?.postal_code ?? null,
     locationPayload.address?.full_address ?? null,
+    // Device status
     locationPayload.battery_level,
     locationPayload.cellular_dbm,
+    locationPayload.cellular_network_type,
+    locationPayload.cellular_operator,
     locationPayload.wifi_access_points,
   ];
 
@@ -287,42 +330,6 @@ export async function updateDeviceLatest(
     });
     // Don't throw - this is non-critical for webhook processing
   }
-}
-
-/**
- * Extract critical fields from raw payload for device_latest update
- * Used synchronously in webhook handler
- */
-export function extractCriticalFields(payload: TivePayload): {
-  device_imei: string;
-  device_id: string;
-  timestamp: number;
-  temperature: number | null;
-  lat: number;
-  lon: number;
-  battery: number | null;
-  location_accuracy: number | null;
-  location_source: string | null;
-  address_full_address: string | null;
-  cellular_dbm: number | null;
-  wifi_access_points: number | null;
-} {
-  return {
-    device_imei: payload.DeviceId,
-    device_id: payload.DeviceName,
-    timestamp: payload.EntryTimeEpoch,
-    temperature: payload.Temperature?.Celsius ?? null,
-    lat: payload.Location.Latitude,
-    lon: payload.Location.Longitude,
-    battery: payload.Battery?.Percentage ?? null,
-    location_accuracy: payload.Location.Accuracy?.Meters ? Math.round(payload.Location.Accuracy.Meters) : null,
-    location_source: payload.Location.LocationMethod
-      ? payload.Location.LocationMethod.charAt(0).toUpperCase() + payload.Location.LocationMethod.slice(1)
-      : null,
-    address_full_address: payload.Location.FormattedAddress ?? null,
-    cellular_dbm: payload.Cellular?.Dbm ?? null,
-    wifi_access_points: payload.Location.WifiAccessPointUsedCount ?? null,
-  };
 }
 
 /**

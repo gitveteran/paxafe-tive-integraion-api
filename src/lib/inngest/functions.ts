@@ -4,7 +4,7 @@
 
 import { inngest } from './client';
 import { transformToSensorPayload, transformToLocationPayload } from '@/lib/transformers/tive-to-paxafe';
-import { saveTelemetry, saveLocation, updateRawPayloadStatus } from '@/lib/db';
+import { saveTelemetry, saveLocation, updateRawPayloadStatus, updateDeviceLatest } from '@/lib/db';
 import { TivePayload } from '@/types/tive';
 import { logger } from '@/lib/logger';
 
@@ -55,7 +55,29 @@ export const processTiveWebhook = inngest.createFunction(
       }
     });
 
-    // Step 3: Update raw payload status
+    // Step 3: Update device_latest asynchronously (for normal events or to ensure complete data)
+    // Note: Critical events may have already updated device_latest synchronously,
+    // but this ensures device_latest always has the complete, latest data
+    await step.run('update-device-latest', async () => {
+      try {
+        await updateDeviceLatest(
+          sensorPayload.device_imei,
+          sensorPayload.device_id,
+          sensorPayload.timestamp,
+          sensorPayload,
+          locationPayload
+        );
+      } catch (error) {
+        // Non-critical, log but don't fail
+        logger.error('Failed to update device_latest (async)', {
+          error: error instanceof Error ? error.message : 'Unknown',
+          device_imei: sensorPayload.device_imei,
+          raw_id,
+        });
+      }
+    });
+
+    // Step 4: Update raw payload status
     await step.run('update-raw-status', async () => {
       try {
         await updateRawPayloadStatus(raw_id, 'completed');
