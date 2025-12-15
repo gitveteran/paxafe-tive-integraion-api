@@ -6,9 +6,8 @@
  * stores raw payload, and triggers Inngest for async processing.
  * 
  * Architecture:
- * - Critical events: Save telemetry, locations, and device_latest synchronously for immediate alerts
- *   (Still sends to Inngest for raw payload status update, but skips duplicate saves)
- * - Normal events: Save telemetry, locations, and device_latest asynchronously via Inngest
+ * - All events: Update device_latest critical fields synchronously for real-time dashboard
+ * - All events: Save telemetry, locations, and update device_latest references asynchronously via Inngest
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -16,9 +15,7 @@ import { validateTivePayload } from '@/lib/validators/tive-validator';
 import { transformToSensorPayload, transformToLocationPayload } from '@/lib/transformers/tive-to-paxafe';
 import {
   storeRawPayload,
-  updateDeviceLatest,
-  saveTelemetry,
-  saveLocation,
+  updateDeviceLatestCritical,
 } from '@/lib/db';
 import { notifyTiveOfError } from '@/lib/notifications/tive-notification';
 import { inngest } from '@/lib/inngest/client';
@@ -28,7 +25,6 @@ import { logger } from '@/lib/logger';
 import { config } from '@/lib/config';
 import { VALIDATION } from '@/lib/constants';
 import { successResponse, errorResponse } from '@/lib/api/response';
-import { isCriticalEvent } from '@/lib/utils/critical-detector';
 
 /**
  * Validate API key from request headers
@@ -151,109 +147,92 @@ export async function POST(request: NextRequest) {
     }
 
 
-    // 7. Check for critical events (values outside normal operating ranges)
-    const criticalCheck = isCriticalEvent(body as TivePayload);
-    let criticalSensorPayload, criticalLocationPayload;
+    // 7. Transform payload for synchronous device_latest update
+    let sensorPayload, locationPayload;
     
     try {
-      criticalSensorPayload = transformToSensorPayload(body as TivePayload);
-      criticalLocationPayload = transformToLocationPayload(body as TivePayload);
+      sensorPayload = transformToSensorPayload(body as TivePayload);
+      locationPayload = transformToLocationPayload(body as TivePayload);
     } catch (transformError) {
       logger.error('Failed to transform payload', { error: transformError instanceof Error ? transformError.message : 'Unknown' });
       // Continue - transformation errors are handled
     }
 
-    // 8. Update device_latest conditionally based on criticality
-    let criticalTelemetryId: number | undefined;
-    let criticalLocationId: number | undefined;
-    
-    if (criticalCheck.isCritical && criticalSensorPayload && criticalLocationPayload) {
-      // CRITICAL EVENT: Save telemetry and location synchronously, then update device_latest
-      // This ensures immediate dashboard alerts for critical events
+    // 8. Update device_latest critical fields synchronously (for real-time dashboard)
+    // All events update critical fields synchronously for immediate dashboard visibility
+    if (sensorPayload && locationPayload) {
       try {
-        const [telemetryId, locationId] = await Promise.all([
-          saveTelemetry(criticalSensorPayload),
-          saveLocation(criticalLocationPayload),
-        ]);
-        
-        criticalTelemetryId = telemetryId;
-        criticalLocationId = locationId;
-        
-        await updateDeviceLatest(
-          criticalSensorPayload.device_imei,
-          criticalSensorPayload.device_id,
-          body.EntryTimeEpoch,
-          telemetryId,
-          locationId
+        await updateDeviceLatestCritical(
+          sensorPayload.device_imei,
+          sensorPayload.device_id,
+          sensorPayload.timestamp,
+          sensorPayload,
+          locationPayload
         );
-        logger.warn('Critical event: device_latest updated synchronously', {
+        
+        logger.debug('Device latest critical fields updated synchronously', {
           device_id: body.DeviceId,
-          reasons: criticalCheck.reasons,
         });
       } catch (updateError) {
-        logger.error('Failed to update device_latest (critical)', { 
+        logger.error('Failed to update device_latest (critical fields)', { 
           error: updateError instanceof Error ? updateError.message : 'Unknown',
           device_id: body.DeviceId,
         });
         // Continue - still process via Inngest as fallback
       }
     }
-    // Note: Normal events will update device_latest asynchronously via Inngest
+    // Note: References to telemetry/locations will be updated asynchronously via Inngest
 
-    // 9. Trigger Inngest event for async processing (normalization and storage)
-    let inngestEventId: string | undefined;
-    try {
-      const event = await inngest.send({
-        name: 'webhook/tive.process',
-        data: {
-          raw_id: rawPayloadId,
-          payload: body as TivePayload,
-          timestamp: Date.now(),
-          is_critical: criticalCheck.isCritical,
-          // If critical event was saved synchronously, pass IDs to avoid duplicate saves
-          telemetry_id: criticalTelemetryId,
-          location_id: criticalLocationId,
-        },
-      });
-      
-      // Store Inngest event ID for tracking
-      if (event && event.ids && event.ids.length > 0) {
-        inngestEventId = event.ids[0];
-        // Update raw payload with Inngest event ID (non-blocking)
-        storeRawPayload(body as TivePayload, undefined, 'pending', inngestEventId)
-          .catch(err => logger.error('Failed to update Inngest event ID', { error: err instanceof Error ? err.message : 'Unknown' }));
-      }
-    } catch (inngestError) {
-      logger.error('Failed to send Inngest event', { error: inngestError instanceof Error ? inngestError.message : 'Unknown' });
-      // Update raw payload status to failed
-      try {
-        await storeRawPayload(
-          body as TivePayload,
-          undefined,
-          'failed'
-        );
-      } catch (dbError) {
-        logger.error('Failed to update raw payload status', { error: dbError instanceof Error ? dbError.message : 'Unknown' });
-      }
-      
-      return errorResponse(
-        'Processing error',
-        'Failed to queue payload for processing. Please retry.',
-        503,
-        { payload_id: rawPayloadId }
-      );
-    }
-
-    // 10. Return success response immediately
-    return successResponse({
-      device_id: criticalSensorPayload?.device_id || body.DeviceName,
-      device_imei: criticalSensorPayload?.device_imei || body.DeviceId,
+    // 9. Return success response immediately (don't wait for Inngest)
+    // Critical fields are already updated synchronously, so Tive gets fast response
+    const response = successResponse({
+      device_id: sensorPayload?.device_id || body.DeviceName,
+      device_imei: sensorPayload?.device_imei || body.DeviceId,
       timestamp: body.EntryTimeEpoch,
-      is_critical: criticalCheck.isCritical,
-      critical_reasons: criticalCheck.isCritical ? criticalCheck.reasons : undefined,
       payload_id: rawPayloadId,
-      inngest_event_id: inngestEventId,
-    }, 'Payload received and queued for processing');
+    }, 'Payload received and processing');
+
+    // 10. Trigger Inngest event for async processing (non-blocking, fire-and-forget)
+    // This runs after the response is sent, so it doesn't block the webhook response
+    inngest.send({
+      name: 'webhook/tive.process',
+      data: {
+        raw_id: rawPayloadId,
+        payload: body as TivePayload,
+        timestamp: Date.now(),
+      },
+    })
+      .then((event) => {
+        // Update raw payload with Inngest event ID (non-blocking)
+        if (event && event.ids && event.ids.length > 0) {
+          const inngestEventId = event.ids[0];
+          storeRawPayload(body as TivePayload, undefined, 'pending', inngestEventId)
+            .catch(err => logger.error('Failed to update Inngest event ID', { 
+              error: err instanceof Error ? err.message : 'Unknown',
+              payload_id: rawPayloadId,
+            }));
+        }
+      })
+      .catch((inngestError) => {
+        // Log error but don't fail - webhook already returned success
+        logger.error('Failed to send Inngest event (async processing may be delayed)', { 
+          error: inngestError instanceof Error ? inngestError.message : 'Unknown',
+          device_id: body.DeviceId,
+          payload_id: rawPayloadId,
+          note: 'Critical fields already updated synchronously. Async processing will be retried if Inngest is configured later.'
+        });
+        
+        // Update raw payload status to indicate Inngest was not available
+        // Keep as pending so it can be processed when Inngest is available
+        storeRawPayload(body as TivePayload, undefined, 'pending')
+          .catch(dbError => logger.error('Failed to update raw payload status', { 
+            error: dbError instanceof Error ? dbError.message : 'Unknown',
+            payload_id: rawPayloadId,
+          }));
+      });
+
+    // Return response immediately (Inngest processing happens in background)
+    return response;
 
   } catch (error) {
     // Catch-all for unexpected errors

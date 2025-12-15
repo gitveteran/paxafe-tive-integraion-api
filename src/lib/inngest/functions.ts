@@ -4,7 +4,7 @@
 
 import { inngest } from './client';
 import { transformToSensorPayload, transformToLocationPayload } from '@/lib/transformers/tive-to-paxafe';
-import { saveTelemetry, saveLocation, updateRawPayloadStatus, updateDeviceLatest } from '@/lib/db';
+import { saveTelemetry, saveLocation, updateRawPayloadStatus, updateDeviceLatestReferences } from '@/lib/db';
 import { TivePayload } from '@/types/tive';
 import { logger } from '@/lib/logger';
 
@@ -21,12 +21,9 @@ export const processTiveWebhook = inngest.createFunction(
   },
   { event: 'webhook/tive.process' },
   async ({ event, step }) => {
-    const { raw_id, payload, is_critical, telemetry_id, location_id } = event.data as {
+    const { raw_id, payload } = event.data as {
       raw_id: number;
       payload: TivePayload;
-      is_critical?: boolean;
-      telemetry_id?: number;
-      location_id?: number;
     };
 
     // Step 1: Transform to PAXAFE formats
@@ -47,18 +44,8 @@ export const processTiveWebhook = inngest.createFunction(
     });
 
     // Step 2: Store normalized data in separate tables and get IDs
-    // Skip if already saved synchronously for critical events (IDs provided)
+    // All events are saved asynchronously (critical fields already updated synchronously in webhook)
     const { telemetryId, locationId } = await step.run('save-normalized-data', async () => {
-      // If IDs are provided (critical event already saved synchronously), use them
-      if (is_critical && telemetry_id && location_id) {
-        logger.debug('Critical event already saved synchronously, using provided IDs', {
-          telemetry_id,
-          location_id,
-        });
-        return { telemetryId: telemetry_id, locationId: location_id };
-      }
-      
-      // For normal events, or if critical event save failed, save them now
       try {
         const [telemetryId, locationId] = await Promise.all([
           saveTelemetry(sensorPayload),
@@ -70,30 +57,25 @@ export const processTiveWebhook = inngest.createFunction(
       }
     });
 
-    // Step 3: Update device_latest asynchronously
-    // Skip if already updated synchronously for critical events
-    if (!is_critical || !telemetry_id || !location_id) {
-      await step.run('update-device-latest', async () => {
-        try {
-          await updateDeviceLatest(
-            sensorPayload.device_imei,
-            sensorPayload.device_id,
-            sensorPayload.timestamp,
-            telemetryId,
-            locationId
-          );
-        } catch (error) {
-          // Non-critical, log but don't fail
-          logger.error('Failed to update device_latest (async)', {
-            error: error instanceof Error ? error.message : 'Unknown',
-            device_imei: sensorPayload.device_imei,
-            raw_id,
-          });
-        }
-      });
-    } else {
-      logger.debug('Critical event device_latest already updated synchronously, skipping');
-    }
+    // Step 3: Update device_latest references asynchronously
+    // Critical fields are already updated synchronously in webhook handler
+    // This updates the references to telemetry/locations for consistency and audit trail
+    await step.run('update-device-latest-references', async () => {
+      try {
+        await updateDeviceLatestReferences(
+          sensorPayload.device_imei,
+          telemetryId,
+          locationId
+        );
+      } catch (error) {
+        // Non-critical, log but don't fail
+        logger.error('Failed to update device_latest references (async)', {
+          error: error instanceof Error ? error.message : 'Unknown',
+          device_imei: sensorPayload.device_imei,
+          raw_id,
+        });
+      }
+    });
 
     // Step 4: Update raw payload status
     await step.run('update-raw-status', async () => {

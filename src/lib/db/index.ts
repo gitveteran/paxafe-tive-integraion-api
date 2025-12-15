@@ -202,9 +202,144 @@ export async function saveLocation(payload: PaxafeLocationPayload): Promise<numb
 }
 
 /**
- * Update device_latest table with references to latest telemetry and location records
- * Can be called synchronously (critical events) or asynchronously (normal events)
- * This stores references instead of duplicating data, reducing storage and ensuring consistency
+ * Update device_latest table with critical fields synchronously
+ * This is called during webhook processing for real-time dashboard updates
+ * Critical fields are stored directly (no JOIN needed for dashboard queries)
+ */
+export async function updateDeviceLatestCritical(
+  deviceImei: string,
+  deviceId: string,
+  timestamp: number,
+  sensorPayload: PaxafeSensorPayload,
+  locationPayload: PaxafeLocationPayload
+): Promise<void> {
+  const query = `
+    INSERT INTO device_latest (
+      device_imei, device_id, provider, last_ts,
+      -- Critical sensor fields (updated synchronously)
+      last_temperature, last_humidity, last_light_level,
+      last_accelerometer_x, last_accelerometer_y, last_accelerometer_z, last_accelerometer_magnitude,
+      -- Critical location fields (updated synchronously)
+      last_lat, last_lon, last_altitude,
+      location_accuracy, location_accuracy_category, location_source,
+      address_street, address_locality, address_state, address_country, address_postal_code, address_full_address,
+      -- Critical device status (updated synchronously)
+      battery_level, cellular_dbm, cellular_network_type, cellular_operator, wifi_access_points,
+      updated_at
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, CURRENT_TIMESTAMP
+    )
+    ON CONFLICT (device_imei) DO UPDATE SET
+      device_id = EXCLUDED.device_id,
+      last_ts = EXCLUDED.last_ts,
+      -- Update critical fields synchronously
+      last_temperature = EXCLUDED.last_temperature,
+      last_humidity = EXCLUDED.last_humidity,
+      last_light_level = EXCLUDED.last_light_level,
+      last_accelerometer_x = EXCLUDED.last_accelerometer_x,
+      last_accelerometer_y = EXCLUDED.last_accelerometer_y,
+      last_accelerometer_z = EXCLUDED.last_accelerometer_z,
+      last_accelerometer_magnitude = EXCLUDED.last_accelerometer_magnitude,
+      last_lat = EXCLUDED.last_lat,
+      last_lon = EXCLUDED.last_lon,
+      last_altitude = EXCLUDED.last_altitude,
+      location_accuracy = EXCLUDED.location_accuracy,
+      location_accuracy_category = EXCLUDED.location_accuracy_category,
+      location_source = EXCLUDED.location_source,
+      address_street = EXCLUDED.address_street,
+      address_locality = EXCLUDED.address_locality,
+      address_state = EXCLUDED.address_state,
+      address_country = EXCLUDED.address_country,
+      address_postal_code = EXCLUDED.address_postal_code,
+      address_full_address = EXCLUDED.address_full_address,
+      battery_level = EXCLUDED.battery_level,
+      cellular_dbm = EXCLUDED.cellular_dbm,
+      cellular_network_type = EXCLUDED.cellular_network_type,
+      cellular_operator = EXCLUDED.cellular_operator,
+      wifi_access_points = EXCLUDED.wifi_access_points,
+      updated_at = CURRENT_TIMESTAMP
+  `;
+
+  const values = [
+    deviceImei,
+    deviceId,
+    sensorPayload.provider,
+    timestamp,
+    // Sensor data
+    sensorPayload.temperature,
+    sensorPayload.humidity,
+    sensorPayload.light_level,
+    sensorPayload.accelerometer?.x ?? null,
+    sensorPayload.accelerometer?.y ?? null,
+    sensorPayload.accelerometer?.z ?? null,
+    sensorPayload.accelerometer?.magnitude ?? null,
+    // Location data
+    locationPayload.latitude,
+    locationPayload.longitude,
+    locationPayload.altitude,
+    locationPayload.location_accuracy,
+    locationPayload.location_accuracy_category,
+    locationPayload.location_source,
+    locationPayload.address?.street ?? null,
+    locationPayload.address?.locality ?? null,
+    locationPayload.address?.state ?? null,
+    locationPayload.address?.country ?? null,
+    locationPayload.address?.postal_code ?? null,
+    locationPayload.address?.full_address ?? null,
+    // Device status
+    locationPayload.battery_level,
+    locationPayload.cellular_dbm,
+    locationPayload.cellular_network_type,
+    locationPayload.cellular_operator,
+    locationPayload.wifi_access_points,
+  ];
+
+  try {
+    await pool.query(query, values);
+  } catch (error) {
+    logger.error('Error updating device_latest (critical)', {
+      error: error instanceof Error ? error.message : 'Unknown',
+      deviceImei,
+      deviceId,
+      timestamp,
+    });
+    // Don't throw - this is non-critical for webhook processing
+  }
+}
+
+/**
+ * Update device_latest table with references to telemetry and location records
+ * This is called asynchronously via Inngest for consistency and audit trail
+ * References allow linking back to the normalized tables
+ */
+export async function updateDeviceLatestReferences(
+  deviceImei: string,
+  telemetryId: number,
+  locationId: number
+): Promise<void> {
+  const query = `
+    UPDATE device_latest
+    SET latest_telemetry_id = $1,
+        latest_location_id = $2
+    WHERE device_imei = $3
+  `;
+
+  try {
+    await pool.query(query, [telemetryId, locationId, deviceImei]);
+  } catch (error) {
+    logger.error('Error updating device_latest references', {
+      error: error instanceof Error ? error.message : 'Unknown',
+      deviceImei,
+      telemetryId,
+      locationId,
+    });
+    // Don't throw - this is non-critical
+  }
+}
+
+/**
+ * @deprecated Use updateDeviceLatestCritical() for synchronous updates and updateDeviceLatestReferences() for async updates
+ * Kept for backward compatibility
  */
 export async function updateDeviceLatest(
   deviceImei: string,
@@ -213,42 +348,8 @@ export async function updateDeviceLatest(
   telemetryId: number,
   locationId: number
 ): Promise<void> {
-  const query = `
-    INSERT INTO device_latest (
-      device_imei, device_id, provider, last_ts,
-      latest_telemetry_id, latest_location_id,
-      updated_at
-    ) VALUES (
-      $1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP
-    )
-    ON CONFLICT (device_imei) DO UPDATE SET
-      device_id = EXCLUDED.device_id,
-      last_ts = EXCLUDED.last_ts,
-      latest_telemetry_id = EXCLUDED.latest_telemetry_id,
-      latest_location_id = EXCLUDED.latest_location_id,
-      updated_at = CURRENT_TIMESTAMP
-  `;
-
-  const values = [
-    deviceImei,
-    deviceId,
-    'Tive', // provider
-    timestamp,
-    telemetryId,
-    locationId,
-  ];
-
-  try {
-    await pool.query(query, values);
-  } catch (error) {
-    logger.error('Error updating device_latest', {
-      error: error instanceof Error ? error.message : 'Unknown',
-      deviceImei,
-      deviceId,
-      timestamp,
-    });
-    // Don't throw - this is non-critical for webhook processing
-  }
+  // For backward compatibility, update references only
+  await updateDeviceLatestReferences(deviceImei, telemetryId, locationId);
 }
 
 /**

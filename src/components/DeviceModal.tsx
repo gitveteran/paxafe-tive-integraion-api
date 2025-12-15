@@ -139,16 +139,18 @@ export function DeviceModal({ device, isOpen, onClose }: DeviceModalProps) {
               <hr />
               <h6 className="text-uppercase text-muted fw-bold mb-3">Device Status</h6>
               <div className="row g-3">
-                {device.battery_level !== null && (
-                  <div className="col-md-6">
-                    <div className="d-flex justify-content-between align-items-center">
+                <div className="col-md-6">
+                  {device.battery_level !== null ? (
+                    <div className="d-flex justify-content-between align-items-center py-2 border-bottom">
                       <span className="text-muted small">Battery</span>
                       <span className={`badge ${getBatteryBadgeClass(device.battery_level)}`}>
                         {device.battery_level}%
                       </span>
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <DetailRow label="Battery" value="N/A" />
+                  )}
+                </div>
                 <div className="col-md-6">
                   <DetailRow label="Cellular Signal" value={device.cellular_dbm !== null ? `${formatNumber(device.cellular_dbm, 1)} dBm` : 'N/A'} />
                 </div>

@@ -7,6 +7,20 @@ import { PaxafeSensorPayload, PaxafeLocationPayload } from '@/types/paxafe';
 import { ACCURACY_CATEGORIES } from '@/lib/constants';
 
 /**
+ * Normalize timestamp to milliseconds
+ * Handles both seconds and milliseconds timestamps
+ * If timestamp is less than 1e12 (year 2001 in ms), assume it's in seconds
+ */
+function normalizeTimestamp(epoch: number): number {
+  // If timestamp is less than 1e12 (Jan 1, 2001 in milliseconds),
+  // it's likely in seconds, so convert to milliseconds
+  if (epoch < 1e12) {
+    return epoch * 1000;
+  }
+  return epoch;
+}
+
+/**
  * Transform Tive payload to PAXAFE sensor format
  */
 export function transformToSensorPayload(tive: TivePayload): PaxafeSensorPayload {
@@ -44,7 +58,7 @@ export function transformToSensorPayload(tive: TivePayload): PaxafeSensorPayload
   return {
     device_id: tive.DeviceName,
     device_imei: tive.DeviceId,
-    timestamp: tive.EntryTimeEpoch,
+    timestamp: normalizeTimestamp(tive.EntryTimeEpoch),
     provider: "Tive",
     type: "Active",
     temperature,
@@ -99,7 +113,7 @@ export function transformToLocationPayload(tive: TivePayload): PaxafeLocationPay
   return {
     device_id: tive.DeviceName,
     device_imei: tive.DeviceId,
-    timestamp: tive.EntryTimeEpoch,
+    timestamp: normalizeTimestamp(tive.EntryTimeEpoch),
     provider: "Tive",
     type: "Active",
     latitude: tive.Location.Latitude,
