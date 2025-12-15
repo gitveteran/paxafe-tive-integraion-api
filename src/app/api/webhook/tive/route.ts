@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateTivePayload } from '@/lib/validators/tive-validator';
+import { validateApiKey } from '@/lib/validators/api-key-validator';
 import { transformToSensorPayload, transformToLocationPayload } from '@/lib/transformers/tive-to-paxafe';
 import {
   storeRawPayload,
@@ -21,39 +22,10 @@ import {
 import { notifyTiveOfError } from '@/lib/notifications/tive-notification';
 import { inngest } from '@/lib/inngest/client';
 import { TivePayload } from '@/types/tive';
-import { timingSafeEqual } from 'crypto';
 import { logger } from '@/lib/logger';
 import { config } from '@/lib/config';
 import { VALIDATION } from '@/lib/constants';
 import { successResponse, errorResponse } from '@/lib/api/response';
-
-/**
- * Validate API key from request headers
- */
-function validateApiKey(request: NextRequest): boolean {
-  const apiKey = 
-    request.headers.get('x-api-key') || 
-    request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
-  
-  const expectedApiKey = config.apiKey;
-  
-  if (!expectedApiKey || !apiKey) {
-    return false;
-  }
-
-  // Timing-safe comparison to prevent timing attacks
-  if (apiKey.length !== expectedApiKey.length) {
-    return false;
-  }
-
-  try {
-    const apiKeyBuffer = Buffer.from(apiKey, 'utf8');
-    const expectedBuffer = Buffer.from(expectedApiKey, 'utf8');
-    return timingSafeEqual(apiKeyBuffer, expectedBuffer);
-  } catch {
-    return false;
-  }
-}
 
 export async function POST(request: NextRequest) {
   let rawPayloadId: number | undefined;
