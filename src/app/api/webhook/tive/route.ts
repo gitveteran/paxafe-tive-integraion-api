@@ -10,7 +10,7 @@
  * - All events: Save telemetry, locations, and update device_latest references asynchronously via Inngest
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { validateTivePayload } from '@/lib/validators/tive-validator';
 import { validateApiKey } from '@/lib/validators/api-key-validator';
 import { transformToSensorPayload, transformToLocationPayload } from '@/lib/transformers/tive-to-paxafe';
@@ -23,7 +23,6 @@ import { notifyTiveOfError } from '@/lib/notifications/tive-notification';
 import { inngest } from '@/lib/inngest/client';
 import { TivePayload } from '@/types/tive';
 import { logger } from '@/lib/logger';
-import { config } from '@/lib/config';
 import { VALIDATION } from '@/lib/constants';
 import { successResponse, errorResponse } from '@/lib/api/response';
 
@@ -192,16 +191,8 @@ export async function POST(request: NextRequest) {
           error: inngestError instanceof Error ? inngestError.message : 'Unknown',
           device_id: body.DeviceId,
           payload_id: rawPayloadId,
-          note: 'Critical fields already updated synchronously. Async processing will be retried if Inngest is configured later.'
+          note: 'Critical fields already updated synchronously. Async processing will be retried if Inngest is configured later. Payload status remains "pending".'
         });
-        
-        // Update raw payload status to indicate Inngest was not available
-        // Keep as pending so it can be processed when Inngest is available
-        storeRawPayload(body as TivePayload, undefined, 'pending')
-          .catch(dbError => logger.error('Failed to update raw payload status', { 
-            error: dbError instanceof Error ? dbError.message : 'Unknown',
-            payload_id: rawPayloadId,
-          }));
       });
 
     // Return response immediately (Inngest processing happens in background)
