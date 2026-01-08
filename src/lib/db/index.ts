@@ -317,9 +317,14 @@ export async function updateDeviceLatest(
  * Execute multiple operations in a transaction
  */
 export async function withTransaction<T>(
-  callback: (tx: PrismaClient) => Promise<T>
+  callback: (
+    tx: Omit<
+      PrismaClient,
+      '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+    >
+  ) => Promise<T>
 ): Promise<T> {
-  return await prisma.$transaction(callback);
+  return (await prisma.$transaction(callback)) as T;
 }
 
 /**
