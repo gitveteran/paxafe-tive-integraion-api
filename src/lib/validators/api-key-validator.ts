@@ -44,18 +44,4 @@ export function validateApiKey(request: NextRequest): boolean {
   }
 }
 
-/**
- * Get API key from request headers (for logging/debugging purposes)
- * Does not validate the key, only extracts it
- * 
- * @param request - Next.js request object
- * @returns API key string or null if not found
- */
-export function getApiKeyFromRequest(request: NextRequest): string | null {
-  return (
-    request.headers.get('x-api-key') || 
-    request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ||
-    null
-  );
-}
 

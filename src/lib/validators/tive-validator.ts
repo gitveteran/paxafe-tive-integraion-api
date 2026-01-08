@@ -3,7 +3,6 @@
  * Handles validation errors and edge cases
  */
 
-import { TivePayload } from '@/types/tive';
 import { VALIDATION } from '@/lib/constants';
 
 export interface ValidationError {
