@@ -128,6 +128,37 @@ export function validateTivePayload(payload: any): ValidationResult {
     }
   }
 
+  if (payload.Accelerometer) {
+    console.log("HI", payload.Accelerometer, VALIDATION.ACCELEROMETER_MAX, VALIDATION.ACCELEROMETER_MIN);
+    if (payload.Accelerometer.X < VALIDATION.ACCELEROMETER_MIN) {
+      errors.push({ field: 'Accelerometer.X', message: `Accelerometer.X must be greater than ${VALIDATION.ACCELEROMETER_MIN}`});
+    }
+    if (payload.Accelerometer.X > VALIDATION.ACCELEROMETER_MAX) {
+      errors.push({ field: 'Accelerometer.X', message: `Accelerometer.X must be less than ${VALIDATION.ACCELEROMETER_MAX}`});
+    }
+
+    if (payload.Accelerometer.Y < VALIDATION.ACCELEROMETER_MIN) {
+      errors.push({ field: 'Accelerometer.Y', message: `Accelerometer.Y must be greater than ${VALIDATION.ACCELEROMETER_MIN}`});
+    }
+    if (payload.Accelerometer.Y > VALIDATION.ACCELEROMETER_MAX) {
+      errors.push({ field: 'Accelerometer.Y', message: `Accelerometer.Y must be less than ${VALIDATION.ACCELEROMETER_MAX}`});
+    }
+
+    if (payload.Accelerometer.Z < VALIDATION.ACCELEROMETER_MIN) {
+      errors.push({ field: 'Accelerometer.Z', message: `Accelerometer.Z must be greater than ${VALIDATION.ACCELEROMETER_MIN}`});
+    }
+    if (payload.Accelerometer.Z > VALIDATION.ACCELEROMETER_MAX) {
+      errors.push({ field: 'Accelerometer.Z', message: `Accelerometer.Z must be less than ${VALIDATION.ACCELEROMETER_MAX}`});
+    }
+
+    if (payload.Accelerometer.G < VALIDATION.ACCELEROMETER_MIN) {
+      errors.push({ field: 'Accelerometer.G', message: `Accelerometer.G must be greater than ${VALIDATION.ACCELEROMETER_MIN}`});
+    }
+    if (payload.Accelerometer.G > VALIDATION.ACCELEROMETER_MAX) {
+      errors.push({ field: 'Accelerometer.G', message: `Accelerometer.G must be less than ${VALIDATION.ACCELEROMETER_MAX}`});
+    }
+  }
+
   return {
     valid: errors.length === 0,
     errors,
