@@ -18,7 +18,7 @@ jest.mock('@/lib/logger', () => ({
 jest.mock('@/lib/db', () => ({
   pool: { query: jest.fn() },
   storeRawPayload: jest.fn(),
-  updateDeviceLatest: jest.fn(),
+  updateDeviceLatestCritical: jest.fn(),
   saveTelemetry: jest.fn(),
   saveLocation: jest.fn(),
 }));
@@ -68,11 +68,11 @@ describe('POST /api/webhook/tive', () => {
   });
 
   it('should return 200 when payload is valid', async () => {
-    const { storeRawPayload, updateDeviceLatest } = require('@/lib/db');
+    const { storeRawPayload, updateDeviceLatestCritical } = require('@/lib/db');
     const { inngest } = require('@/lib/inngest/client');
     
     storeRawPayload.mockResolvedValue(1);
-    updateDeviceLatest.mockResolvedValue(undefined);
+    updateDeviceLatestCritical.mockResolvedValue(undefined);
     inngest.send.mockResolvedValue({ ids: ['evt_123'] });
 
     const request = new NextRequest('http://localhost:3000/api/webhook/tive', {
@@ -176,11 +176,11 @@ describe('POST /api/webhook/tive', () => {
 
 
   it('should accept API key via Authorization header', async () => {
-    const { storeRawPayload, updateDeviceLatest } = require('@/lib/db');
+    const { storeRawPayload, updateDeviceLatestCritical } = require('@/lib/db');
     const { inngest } = require('@/lib/inngest/client');
     
     storeRawPayload.mockResolvedValue(1);
-    updateDeviceLatest.mockResolvedValue(undefined);
+    updateDeviceLatestCritical.mockResolvedValue(undefined);
     inngest.send.mockResolvedValue({ ids: ['evt_123'] });
 
     const request = new NextRequest('http://localhost:3000/api/webhook/tive', {

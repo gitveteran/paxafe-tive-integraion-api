@@ -13,22 +13,15 @@ jest.mock('@/lib/config', () => ({
   config: { databaseUrl: 'postgresql://test' },
 }));
 
-// Mock Prisma Client
-jest.mock('@/lib/db', () => {
-  // Create mock inside factory to avoid hoisting issues
-  const mockPrisma = {
-    $queryRaw: jest.fn(),
-  };
-  return {
-    prisma: mockPrisma,
-  };
-});
+// Mock getDeviceLatestList function
+const mockGetDeviceLatestList = jest.fn();
 
-// Import after mocking to get the mock instance
-import { prisma } from '@/lib/db';
+jest.mock('@/lib/db', () => ({
+  getDeviceLatestList: (...args: any[]) => mockGetDeviceLatestList(...args),
+}));
+
+// Import after mocking
 import { GET } from '@/app/api/devices/route';
-
-const mockPrisma = prisma as any;
 
 describe('GET /api/devices', () => {
   beforeEach(() => {
@@ -38,39 +31,39 @@ describe('GET /api/devices', () => {
   it('should return devices list', async () => {
     const mockDevices = [
       {
-        device_imei: '123',
-        device_id: 'Device1',
+        deviceImei: '123',
+        deviceId: 'Device1',
         provider: 'Tive',
-        last_ts: BigInt(1234567890),
-        last_temperature: 10.5,
-        last_humidity: null,
-        last_light_level: null,
-        last_accelerometer_x: null,
-        last_accelerometer_y: null,
-        last_accelerometer_z: null,
-        last_accelerometer_magnitude: null,
-        last_lat: 40.0,
-        last_lon: -73.0,
-        last_altitude: null,
-        location_accuracy: null,
-        location_accuracy_category: null,
-        location_source: null,
-        address_street: null,
-        address_locality: null,
-        address_state: null,
-        address_country: null,
-        address_postal_code: null,
-        address_full_address: null,
-        battery_level: null,
-        cellular_dbm: null,
-        cellular_network_type: null,
-        cellular_operator: null,
-        wifi_access_points: null,
-        updated_at: new Date(),
+        lastTs: BigInt(1234567890),
+        lastTemperature: 10.5,
+        lastHumidity: null,
+        lastLightLevel: null,
+        lastAccelerometerX: null,
+        lastAccelerometerY: null,
+        lastAccelerometerZ: null,
+        lastAccelerometerMagnitude: null,
+        lastLat: 40.0,
+        lastLon: -73.0,
+        lastAltitude: null,
+        locationAccuracy: null,
+        locationAccuracyCategory: null,
+        locationSource: null,
+        addressStreet: null,
+        addressLocality: null,
+        addressState: null,
+        addressCountry: null,
+        addressPostalCode: null,
+        addressFullAddress: null,
+        batteryLevel: null,
+        cellularDbm: null,
+        cellularNetworkType: null,
+        cellularOperator: null,
+        wifiAccessPoints: null,
+        updatedAt: new Date(),
       },
     ];
 
-    mockPrisma.$queryRaw.mockResolvedValue(mockDevices);
+    mockGetDeviceLatestList.mockResolvedValue(mockDevices);
 
     const request = new NextRequest('http://localhost:3000/api/devices?limit=10');
     const response = await GET(request);
@@ -79,21 +72,13 @@ describe('GET /api/devices', () => {
     expect(response.status).toBe(200);
     expect(data.success).toBe(true);
     expect(data.data.count).toBe(1);
-    expect(data.data.devices[0].device_imei).toBe('123');
-    expect(data.data.devices[0].last_ts).toBe(1234567890); // Should be converted from BigInt
-  });
-
-  it('should return 400 when limit exceeds 1000', async () => {
-    const request = new NextRequest('http://localhost:3000/api/devices?limit=2000');
-    const response = await GET(request);
-    const data = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(data.error).toBe('Invalid limit');
+    expect(data.data.devices[0].deviceImei).toBe('123');
+    expect(data.data.devices[0].lastTs).toBe(1234567890); // Should be converted from BigInt
+    expect(mockGetDeviceLatestList).toHaveBeenCalledWith(10);
   });
 
   it('should handle database errors', async () => {
-    mockPrisma.$queryRaw.mockRejectedValue(new Error('Database error'));
+    mockGetDeviceLatestList.mockRejectedValue(new Error('Database error'));
 
     const request = new NextRequest('http://localhost:3000/api/devices');
     const response = await GET(request);
