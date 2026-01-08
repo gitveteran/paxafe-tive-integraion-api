@@ -6,24 +6,10 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/db';
 import { logger } from '@/lib/logger';
-import { config } from '@/lib/config';
 import { successResponse, errorResponse } from '@/lib/api/response';
-
-// Mark this route as dynamic (required for Next.js 14+)
-// This tells Next.js to always render this route at runtime, not at build time
-export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    // Check if DATABASE_URL is configured
-    if (!config.databaseUrl) {
-      return errorResponse(
-        'Database not configured',
-        'DATABASE_URL environment variable is not set',
-        500
-      );
-    }
-
     const searchParams = request.nextUrl.searchParams;
     const limit = parseInt(searchParams.get('limit') || '100', 10);
 
@@ -111,7 +97,7 @@ export async function GET(request: NextRequest) {
 
     return successResponse({
       count: devices.length,
-      devices: devices.map(device => ({
+      devices: devices.map((device: any) => ({
         ...device,
         last_ts: Number(device.last_ts), // Convert BigInt to number for JSON serialization
       })),
