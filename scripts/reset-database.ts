@@ -31,7 +31,7 @@ if (!databaseUrl) {
 
 async function resetDatabase() {
   console.log('⚠️  WARNING: This will delete ALL data from the database!');
-  console.log(`Connecting to database: ${databaseUrl.replace(/:[^:@]+@/, ':****@')}`);
+  console.log(`Connecting to database: ${databaseUrl?.replace(/:[^:@]+@/, ':****@')}`);
   console.log('');
   
   try {

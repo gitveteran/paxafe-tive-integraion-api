@@ -1,29 +1,70 @@
 /**
- * Database connection and helper functions
+ * Database helper functions
  * Uses Prisma ORM for type-safe database operations
  */
 
-import { PrismaClient } from '@prisma/client';
 import { PaxafeSensorPayload, PaxafeLocationPayload } from '@/types/paxafe';
 import { TivePayload } from '@/types/tive';
 import { logger } from '@/lib/logger';
 
-// Prisma Client singleton pattern for Next.js
-// Prevents multiple instances in development with hot reloading
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
-};
+import { prisma } from './client';
+import { checkDatabaseHealth, disconnect } from './utils';
 
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+export { prisma, prisma as db } from './client';
+export { checkDatabaseHealth, disconnect, withTransaction } from './utils';
+
+/**
+ * Startup database health check
+ * Verifies database connection when server starts
+ * Terminates the process if connection fails (fail-fast)
+ * 
+ * This runs when the database module is first imported (server startup)
+ */
+async function startupDatabaseCheck() {
+  // Skip during build time - only run at runtime
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    return;
+  }
+
+  // Only run in production or when explicitly enabled
+  if (process.env.NODE_ENV === 'production' || process.env.ENABLE_STARTUP_DB_CHECK === 'true') {
+    try {
+      // Wait a bit for the server to fully initialize
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const isHealthy = await checkDatabaseHealth();
+      if (!isHealthy) {
+        throw new Error('Database health check returned false');
+      }
+      
+      logger.info('Database connection verified on startup');
+    } catch (error) {
+      logger.error('Database connection failed on startup - terminating server', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      
+      // Disconnect and exit
+      await disconnect();
+      process.exit(1);
+    }
+  }
+}
+
+// Run startup check asynchronously (non-blocking)
+// This allows the server to start while checking the connection
+// Only run on server-side (not in browser)
+if (typeof window === 'undefined') {
+  // Use setImmediate to defer execution until after module initialization
+  setImmediate(() => {
+    startupDatabaseCheck().catch((error) => {
+      logger.error('Startup database check failed', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      process.exit(1);
+    });
   });
-
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
-
-// Export prisma for direct access if needed
-export { prisma as db };
+}
 
 /**
  * Store raw webhook payload for audit trail
@@ -313,35 +354,3 @@ export async function updateDeviceLatest(
   await updateDeviceLatestReferences(deviceImei, telemetryId, locationId);
 }
 
-/**
- * Execute multiple operations in a transaction
- */
-export async function withTransaction<T>(
-  callback: (
-    tx: Omit<
-      PrismaClient,
-      '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
-    >
-  ) => Promise<T>
-): Promise<T> {
-  return (await prisma.$transaction(callback)) as T;
-}
-
-/**
- * Add health check function
- */
-export async function checkDatabaseHealth(): Promise<boolean> {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Disconnect Prisma Client (for cleanup)
- */
-export async function disconnect(): Promise<void> {
-  await prisma.$disconnect();
-}
