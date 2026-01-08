@@ -38,7 +38,7 @@ export function DeviceTable({ devices, onRowClick }: DeviceTableProps) {
             <tbody>
               {devices.map((device) => (
                 <tr
-                  key={device.device_imei}
+                  key={device.deviceImei}
                   onClick={() => onRowClick(device)}
                   role="button"
                   tabIndex={0}
@@ -48,32 +48,32 @@ export function DeviceTable({ devices, onRowClick }: DeviceTableProps) {
                       onRowClick(device);
                     }
                   }}
-                  aria-label={`View details for device ${device.device_id}`}
+                  aria-label={`View details for device ${device.deviceId}`}
                 >
                   <td>
                     <div>
-                      <div className="fw-semibold">{device.device_id}</div>
-                      <div className="text-muted small font-monospace">{device.device_imei}</div>
+                      <div className="fw-semibold">{device.deviceId}</div>
+                      <div className="text-muted small font-monospace">{device.deviceImei}</div>
                     </div>
                   </td>
                   <td>
-                    {device.last_temperature !== null ? (
-                      <span className={`badge ${getTemperatureBadgeClass(device.last_temperature)}`}>
-                        {formatNumber(device.last_temperature, 2)}°C
+                    {device.lastTemperature !== null ? (
+                      <span className={`badge ${getTemperatureBadgeClass(device.lastTemperature)}`}>
+                        {formatNumber(device.lastTemperature, 2)}°C
                       </span>
                     ) : (
                       <span className="text-muted">N/A</span>
                     )}
                   </td>
                   <td>
-                    {device.last_lat !== null && device.last_lon !== null ? (
+                    {device.lastLat !== null && device.lastLon !== null ? (
                       <div>
                         <div className="small">
-                          {formatNumber(device.last_lat, 4)}, {formatNumber(device.last_lon, 4)}
+                          {formatNumber(device.lastLat, 4)}, {formatNumber(device.lastLon, 4)}
                         </div>
-                        {device.location_accuracy_category && (
-                          <span className={`badge ${getAccuracyBadgeClass(device.location_accuracy_category)} mt-1`}>
-                            {device.location_accuracy_category}
+                        {device.locationAccuracyCategory && (
+                          <span className={`badge ${getAccuracyBadgeClass(device.locationAccuracyCategory)} mt-1`}>
+                            {device.locationAccuracyCategory}
                           </span>
                         )}
                       </div>
@@ -82,25 +82,25 @@ export function DeviceTable({ devices, onRowClick }: DeviceTableProps) {
                     )}
                   </td>
                   <td>
-                    {device.battery_level !== null ? (
-                      <span className={`badge ${getBatteryBadgeClass(device.battery_level)}`}>
-                        {device.battery_level}%
+                    {device.batteryLevel !== null ? (
+                      <span className={`badge ${getBatteryBadgeClass(device.batteryLevel)}`}>
+                        {device.batteryLevel}%
                       </span>
                     ) : (
                       <span className="text-muted">N/A</span>
                     )}
                   </td>
                   <td>
-                    {device.cellular_dbm !== null ? (
+                    {device.cellularDbm !== null ? (
                       <span className="small">
-                        {formatNumber(device.cellular_dbm, 1)} dBm
+                        {formatNumber(device.cellularDbm, 1)} dBm
                       </span>
                     ) : (
                       <span className="text-muted">N/A</span>
                     )}
                   </td>
                   <td className="text-muted small">
-                    {formatTimestamp(new Date(device.updated_at).getTime())}
+                    {formatTimestamp(new Date(device.updatedAt).getTime())}
                   </td>
                   <td className="text-end">
                     <button

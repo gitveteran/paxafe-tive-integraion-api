@@ -48,9 +48,9 @@ export function DeviceModal({ device, isOpen, onClose }: DeviceModalProps) {
       <Modal.Header closeButton>
         <div>
           <Modal.Title id="deviceModalLabel" className="mb-1">
-            {device.device_id}
+            {device.deviceId}
           </Modal.Title>
-          <p className="text-muted small mb-0 font-monospace">{device.device_imei}</p>
+          <p className="text-muted small mb-0 font-monospace">{device.deviceImei}</p>
         </div>
       </Modal.Header>
 
@@ -61,16 +61,16 @@ export function DeviceModal({ device, isOpen, onClose }: DeviceModalProps) {
             <div className="col-md-6">
               <h6 className="text-uppercase text-muted fw-bold mb-3">Sensor Data</h6>
               <div className="list-group list-group-flush">
-                <DetailRow label="Temperature" value={device.last_temperature !== null ? `${formatNumber(device.last_temperature, 2)}°C` : 'N/A'} />
-                <DetailRow label="Humidity" value={device.last_humidity !== null ? `${formatNumber(device.last_humidity, 1)}%` : 'N/A'} />
-                <DetailRow label="Light Level" value={device.last_light_level !== null ? `${formatNumber(device.last_light_level, 1)} lux` : 'N/A'} />
-                {device.last_accelerometer_x !== null && (
+                <DetailRow label="Temperature" value={device.lastTemperature !== null ? `${formatNumber(device.lastTemperature, 2)}°C` : 'N/A'} />
+                <DetailRow label="Humidity" value={device.lastHumidity !== null ? `${formatNumber(device.lastHumidity, 1)}%` : 'N/A'} />
+                <DetailRow label="Light Level" value={device.lastLightLevel !== null ? `${formatNumber(device.lastLightLevel, 1)} lux` : 'N/A'} />
+                {device.lastAccelerometerX !== null && (
                   <>
                     <hr className="my-2" />
-                    <DetailRow label="Accelerometer X" value={formatNumber(device.last_accelerometer_x, 3)} />
-                    <DetailRow label="Accelerometer Y" value={formatNumber(device.last_accelerometer_y, 3)} />
-                    <DetailRow label="Accelerometer Z" value={formatNumber(device.last_accelerometer_z, 3)} />
-                    <DetailRow label="Magnitude" value={formatNumber(device.last_accelerometer_magnitude, 3)} />
+                    <DetailRow label="Accelerometer X" value={formatNumber(device.lastAccelerometerX, 3)} />
+                    <DetailRow label="Accelerometer Y" value={formatNumber(device.lastAccelerometerY, 3)} />
+                    <DetailRow label="Accelerometer Z" value={formatNumber(device.lastAccelerometerZ, 3)} />
+                    <DetailRow label="Magnitude" value={formatNumber(device.lastAccelerometerMagnitude, 3)} />
                   </>
                 )}
               </div>
@@ -80,56 +80,56 @@ export function DeviceModal({ device, isOpen, onClose }: DeviceModalProps) {
             <div className="col-md-6">
               <h6 className="text-uppercase text-muted fw-bold mb-3">Location Data</h6>
               <div className="list-group list-group-flush">
-                <DetailRow label="Latitude" value={device.last_lat !== null ? formatNumber(device.last_lat, 6) : 'N/A'} />
-                <DetailRow label="Longitude" value={device.last_lon !== null ? formatNumber(device.last_lon, 6) : 'N/A'} />
-                <DetailRow label="Altitude" value={device.last_altitude !== null ? `${formatNumber(device.last_altitude, 2)}m` : 'N/A'} />
-                <DetailRow label="Accuracy" value={device.location_accuracy !== null ? `${device.location_accuracy}m` : 'N/A'} />
-                {device.location_accuracy_category && (
+                <DetailRow label="Latitude" value={device.lastLat !== null ? formatNumber(device.lastLat, 6) : 'N/A'} />
+                <DetailRow label="Longitude" value={device.lastLon !== null ? formatNumber(device.lastLon, 6) : 'N/A'} />
+                <DetailRow label="Altitude" value={device.lastAltitude !== null ? `${formatNumber(device.lastAltitude, 2)}m` : 'N/A'} />
+                <DetailRow label="Accuracy" value={device.locationAccuracy !== null ? `${device.locationAccuracy}m` : 'N/A'} />
+                {device.locationAccuracyCategory && (
                   <div className="d-flex justify-content-between align-items-center py-2">
                     <span className="text-muted small">Accuracy Category</span>
-                    <span className={`badge ${getAccuracyBadgeClass(device.location_accuracy_category)}`}>
-                      {device.location_accuracy_category}
+                    <span className={`badge ${getAccuracyBadgeClass(device.locationAccuracyCategory)}`}>
+                      {device.locationAccuracyCategory}
                     </span>
                   </div>
                 )}
-                <DetailRow label="Source" value={device.location_source || 'N/A'} />
+                <DetailRow label="Source" value={device.locationSource || 'N/A'} />
               </div>
             </div>
 
             {/* Address Section */}
-            {device.address_full_address && (
+            {device.addressFullAddress && (
               <div className="col-12">
                 <hr />
                 <h6 className="text-uppercase text-muted fw-bold mb-3">Address</h6>
                 <div className="row g-3">
-                  {device.address_street && (
+                  {device.addressStreet && (
                     <div className="col-md-6">
-                      <DetailRow label="Street" value={device.address_street} />
+                      <DetailRow label="Street" value={device.addressStreet} />
                     </div>
                   )}
-                  {device.address_locality && (
+                  {device.addressLocality && (
                     <div className="col-md-6">
-                      <DetailRow label="City" value={device.address_locality} />
+                      <DetailRow label="City" value={device.addressLocality} />
                     </div>
                   )}
-                  {device.address_state && (
+                  {device.addressState && (
                     <div className="col-md-6">
-                      <DetailRow label="State" value={device.address_state} />
+                      <DetailRow label="State" value={device.addressState} />
                     </div>
                   )}
-                  {device.address_country && (
+                  {device.addressCountry && (
                     <div className="col-md-6">
-                      <DetailRow label="Country" value={device.address_country} />
+                      <DetailRow label="Country" value={device.addressCountry} />
                     </div>
                   )}
-                  {device.address_postal_code && (
+                  {device.addressPostalCode && (
                     <div className="col-md-6">
-                      <DetailRow label="Postal Code" value={device.address_postal_code} />
+                      <DetailRow label="Postal Code" value={device.addressPostalCode} />
                     </div>
                   )}
                 </div>
                 <div className="mt-3">
-                  <DetailRow label="Full Address" value={device.address_full_address} />
+                  <DetailRow label="Full Address" value={device.addressFullAddress} />
                 </div>
               </div>
             )}
@@ -140,11 +140,11 @@ export function DeviceModal({ device, isOpen, onClose }: DeviceModalProps) {
               <h6 className="text-uppercase text-muted fw-bold mb-3">Device Status</h6>
               <div className="row g-3">
                 <div className="col-md-6">
-                  {device.battery_level !== null ? (
+                  {device.batteryLevel !== null ? (
                     <div className="d-flex justify-content-between align-items-center py-2 border-bottom">
                       <span className="text-muted small">Battery</span>
-                      <span className={`badge ${getBatteryBadgeClass(device.battery_level)}`}>
-                        {device.battery_level}%
+                      <span className={`badge ${getBatteryBadgeClass(device.batteryLevel)}`}>
+                        {device.batteryLevel}%
                       </span>
                     </div>
                   ) : (
@@ -152,16 +152,16 @@ export function DeviceModal({ device, isOpen, onClose }: DeviceModalProps) {
                   )}
                 </div>
                 <div className="col-md-6">
-                  <DetailRow label="Cellular Signal" value={device.cellular_dbm !== null ? `${formatNumber(device.cellular_dbm, 1)} dBm` : 'N/A'} />
+                  <DetailRow label="Cellular Signal" value={device.cellularDbm !== null ? `${formatNumber(device.cellularDbm, 1)} dBm` : 'N/A'} />
                 </div>
                 <div className="col-md-6">
-                  <DetailRow label="Network Type" value={device.cellular_network_type || 'N/A'} />
+                  <DetailRow label="Network Type" value={device.cellularNetworkType || 'N/A'} />
                 </div>
                 <div className="col-md-6">
-                  <DetailRow label="Operator" value={device.cellular_operator || 'N/A'} />
+                  <DetailRow label="Operator" value={device.cellularOperator || 'N/A'} />
                 </div>
                 <div className="col-md-6">
-                  <DetailRow label="WiFi APs" value={device.wifi_access_points !== null ? device.wifi_access_points.toString() : 'N/A'} />
+                  <DetailRow label="WiFi APs" value={device.wifiAccessPoints !== null ? device.wifiAccessPoints.toString() : 'N/A'} />
                 </div>
               </div>
             </div>
@@ -175,10 +175,10 @@ export function DeviceModal({ device, isOpen, onClose }: DeviceModalProps) {
                   <DetailRow label="Provider" value={device.provider} />
                 </div>
                 <div className="col-md-6">
-                  <DetailRow label="Last Timestamp" value={formatTimestamp(device.last_ts)} />
+                  <DetailRow label="Last Timestamp" value={formatTimestamp(device.lastTs)} />
                 </div>
                 <div className="col-md-6">
-                  <DetailRow label="Last Updated" value={formatTimestamp(new Date(device.updated_at).getTime())} />
+                  <DetailRow label="Last Updated" value={formatTimestamp(new Date(device.updatedAt).getTime())} />
                 </div>
               </div>
             </div>

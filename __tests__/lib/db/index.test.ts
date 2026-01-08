@@ -55,7 +55,6 @@ import {
   updateRawPayloadInngestEventId,
   saveTelemetry,
   saveLocation,
-  updateDeviceLatest,
   updateDeviceLatestCritical,
   updateDeviceLatestReferences,
   checkDatabaseHealth,
@@ -312,21 +311,6 @@ describe('Database Functions', () => {
     });
   });
 
-  describe('updateDeviceLatest', () => {
-    it('should update device latest references (backward compatibility)', async () => {
-      mockPrisma.deviceLatest.update.mockResolvedValue({});
-
-      await updateDeviceLatest('863257063350583', 'A571992', Date.now(), 1, 2);
-
-      expect(mockPrisma.deviceLatest.update).toHaveBeenCalledWith({
-        where: { deviceImei: '863257063350583' },
-        data: {
-          latestTelemetryId: 1,
-          latestLocationId: 2,
-        },
-      });
-    });
-  });
 
   describe('checkDatabaseHealth', () => {
     it('should return true when database is healthy', async () => {
