@@ -35,13 +35,31 @@ git push origin main
 # - Vercel will auto-detect Next.js
 ```
 
-#### 2. Set Environment Variables in Vercel
+#### 2. Database Migrations
+
+This project uses **Prisma ORM** for database management. Migrations are automatically run via GitHub Actions before deployment.
+
+**Setup GitHub Secret:**
+1. Go to your GitHub repository → Settings → Secrets and variables → Actions
+2. Add `DATABASE_URL` secret with your Supabase/PostgreSQL connection string
+3. The migration workflow (`.github/workflows/migrate.yaml`) will run automatically on push to main/master
+
+**Manual Migration (if needed):**
+```bash
+# Generate Prisma Client
+npm run db:generate
+
+# Deploy migrations
+npm run db:migrate:deploy
+```
+
+#### 3. Set Environment Variables in Vercel
 
 In Vercel Dashboard → Settings → Environment Variables, add:
 
 **Required:**
 - `API_KEY` - Your API key for webhook authentication
-- `DATABASE_URL` - Your PostgreSQL connection string
+- `DATABASE_URL` - Your PostgreSQL connection string (same as GitHub secret)
 - `INNGEST_EVENT_KEY` - From Inngest dashboard
 - `INNGEST_SIGNING_KEY` - From Inngest dashboard
 
@@ -49,7 +67,7 @@ In Vercel Dashboard → Settings → Environment Variables, add:
 - `TIVE_ERROR_WEBHOOK_URL` - If you want to notify Tive of errors
 - `NODE_ENV` - Set to `production`
 
-#### 3. Configure Inngest
+#### 4. Configure Inngest
 
 1. **Get Your Keys**:
    - Go to https://app.inngest.com
@@ -133,6 +151,8 @@ In Vercel Dashboard → Settings → Environment Variables, add:
 3. **Verify Database Connection**:
    - Ensure `DATABASE_URL` is correct
    - Check if database is accessible from Vercel (not blocked by firewall)
+   - Verify migrations have been applied: `npx prisma migrate status`
+   - Ensure Prisma Client is generated (happens automatically in Vercel build)
 
 #### Function Timeouts
 
@@ -173,6 +193,8 @@ The dev server will:
 - [ ] Vercel URL added to Inngest dashboard
 - [ ] Functions visible in Inngest dashboard
 - [ ] Database accessible from Vercel
+- [ ] Database migrations applied (check GitHub Actions)
+- [ ] Prisma Client generated (automatic in build)
 - [ ] Test webhook payload sent successfully
 - [ ] Events processing in Inngest dashboard
 - [ ] Data appearing in database tables

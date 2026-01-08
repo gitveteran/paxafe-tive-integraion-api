@@ -20,45 +20,53 @@ jest.mock('@/lib/config', () => ({
   },
 }));
 
-// Mock pg module to prevent real Pool creation
-// This must be done BEFORE the db module is loaded
-jest.mock('pg', () => {
-  // Create the mock pool inside the factory
-  const mockPoolInstance = {
-    query: jest.fn(),
-    connect: jest.fn(),
-    end: jest.fn(),
-    on: jest.fn(), // Mock event handlers
-    totalCount: 5,
-    idleCount: 2,
-    waitingCount: 0,
+// Mock Prisma Client
+jest.mock('@prisma/client', () => {
+  // Create mock instance inside factory to avoid hoisting issues
+  const mockInstance = {
+    rawWebhookPayload: {
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    telemetry: {
+      create: jest.fn(),
+    },
+    location: {
+      create: jest.fn(),
+    },
+    deviceLatest: {
+      upsert: jest.fn(),
+      update: jest.fn(),
+    },
+    $queryRaw: jest.fn(),
+    $transaction: jest.fn(),
+    $disconnect: jest.fn(),
   };
   
   return {
-    Pool: jest.fn().mockImplementation(() => mockPoolInstance),
-    PoolClient: jest.fn(), // Mock PoolClient type if needed
+    PrismaClient: jest.fn().mockImplementation(() => mockInstance),
   };
 });
 
-// Import after mocking - the db module will use our mocked Pool
-// When the db module does `new Pool()`, it will get our mockPool
+// Import after mocking
 import {
   storeRawPayload,
   updateRawPayloadStatus,
+  updateRawPayloadInngestEventId,
   saveTelemetry,
   saveLocation,
   updateDeviceLatest,
+  updateDeviceLatestCritical,
+  updateDeviceLatestReferences,
   checkDatabaseHealth,
-  getPoolStats,
   withTransaction,
-  pool,
+  prisma,
 } from '@/lib/db';
 
-// Get the mock pool instance - it's the same one created by the mocked Pool constructor
-// Cast to any to avoid TypeScript issues with jest mocks
-const mockPool = pool as any;
-
 describe('Database Functions', () => {
+  // Use prisma directly as it's the mock instance
+  const mockPrisma = prisma as any;
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -73,24 +81,29 @@ describe('Database Functions', () => {
         Location: { Latitude: 40.810562, Longitude: -73.879285 },
       };
 
-      mockPool.query.mockResolvedValue({
-        rows: [{ id: 1 }],
+      mockPrisma.rawWebhookPayload.create.mockResolvedValue({
+        id: 1,
       });
 
       const result = await storeRawPayload(mockPayload);
 
       expect(result).toBe(1);
-      expect(mockPool.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO raw_webhook_payloads'),
-        expect.arrayContaining([expect.stringContaining('"DeviceId"')])
-      );
+      expect(mockPrisma.rawWebhookPayload.create).toHaveBeenCalledWith({
+        data: {
+          payload: mockPayload,
+          source: 'Tive',
+          status: 'pending',
+          validationErrors: null,
+          inngestEventId: null,
+        },
+      });
     });
 
     it('should handle validation errors', async () => {
       const validationErrors = [{ field: 'DeviceId', message: 'Invalid' }];
       
-      mockPool.query.mockResolvedValue({
-        rows: [{ id: 2 }],
+      mockPrisma.rawWebhookPayload.create.mockResolvedValue({
+        id: 2,
       });
 
       const result = await storeRawPayload(
@@ -100,6 +113,42 @@ describe('Database Functions', () => {
       );
 
       expect(result).toBe(2);
+      expect(mockPrisma.rawWebhookPayload.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          status: 'failed',
+          validationErrors: validationErrors,
+        }),
+      });
+    });
+  });
+
+  describe('updateRawPayloadStatus', () => {
+    it('should update payload status', async () => {
+      mockPrisma.rawWebhookPayload.update.mockResolvedValue({});
+
+      await updateRawPayloadStatus(1, 'completed', 'Success');
+
+      expect(mockPrisma.rawWebhookPayload.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: {
+          status: 'completed',
+          processedAt: expect.any(Date),
+          processingError: 'Success',
+        },
+      });
+    });
+  });
+
+  describe('updateRawPayloadInngestEventId', () => {
+    it('should update inngest event id', async () => {
+      mockPrisma.rawWebhookPayload.update.mockResolvedValue({});
+
+      await updateRawPayloadInngestEventId(1, 'event-123');
+
+      expect(mockPrisma.rawWebhookPayload.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: { inngestEventId: 'event-123' },
+      });
     });
   });
 
@@ -119,36 +168,178 @@ describe('Database Functions', () => {
         box_open: null,
       };
 
-      mockPool.query.mockResolvedValue({
-        rows: [{ id: 1 }],
+      mockPrisma.telemetry.create.mockResolvedValue({
+        id: 1,
       });
 
       const result = await saveTelemetry(payload);
 
       expect(result).toBe(1);
-      expect(mockPool.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO telemetry'),
-        expect.arrayContaining([payload.device_imei, payload.timestamp])
+      expect(mockPrisma.telemetry.create).toHaveBeenCalledWith({
+        data: {
+          deviceId: payload.device_id,
+          deviceImei: payload.device_imei,
+          ts: BigInt(payload.timestamp),
+          provider: payload.provider,
+          type: payload.type,
+          temperature: payload.temperature,
+          humidity: payload.humidity,
+          lightLevel: payload.light_level,
+          accelerometerX: payload.accelerometer?.x,
+          accelerometerY: payload.accelerometer?.y,
+          accelerometerZ: payload.accelerometer?.z,
+          accelerometerMagnitude: payload.accelerometer?.magnitude,
+        },
+      });
+    });
+  });
+
+  describe('saveLocation', () => {
+    it('should save location as new record', async () => {
+      const payload: PaxafeLocationPayload = {
+        device_id: 'A571992',
+        device_imei: '863257063350583',
+        timestamp: Date.now(),
+        provider: 'Tive',
+        type: 'Active',
+        latitude: 40.810562,
+        longitude: -73.879285,
+        altitude: 10.5,
+        location_accuracy: 5,
+        location_accuracy_category: 'High',
+        location_source: 'gps',
+        address: {
+          street: '123 Main St',
+          locality: 'New York',
+          state: 'NY',
+          country: 'USA',
+          postal_code: '10001',
+          full_address: '123 Main St, New York, NY 10001',
+        },
+        battery_level: 85,
+        cellular_dbm: -70,
+        cellular_network_type: 'LTE',
+        cellular_operator: 'Verizon',
+        wifi_access_points: 3,
+      };
+
+      mockPrisma.location.create.mockResolvedValue({
+        id: 1,
+      });
+
+      const result = await saveLocation(payload);
+
+      expect(result).toBe(1);
+      expect(mockPrisma.location.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          deviceId: payload.device_id,
+          deviceImei: payload.device_imei,
+          ts: BigInt(payload.timestamp),
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+        }),
+      });
+    });
+  });
+
+  describe('updateDeviceLatestCritical', () => {
+    it('should upsert device latest with critical fields', async () => {
+      const sensorPayload: PaxafeSensorPayload = {
+        device_id: 'A571992',
+        device_imei: '863257063350583',
+        timestamp: Date.now(),
+        provider: 'Tive',
+        type: 'Active',
+        temperature: 10.08,
+        humidity: 38.7,
+        light_level: 0.0,
+        accelerometer: { x: -0.562, y: -0.437, z: 0.688, magnitude: 0.99 },
+        tilt: null,
+        box_open: null,
+      };
+
+      const locationPayload: PaxafeLocationPayload = {
+        device_id: 'A571992',
+        device_imei: '863257063350583',
+        timestamp: Date.now(),
+        provider: 'Tive',
+        type: 'Active',
+        latitude: 40.810562,
+        longitude: -73.879285,
+        altitude: null,
+        location_accuracy: null,
+        location_accuracy_category: null,
+        location_source: null,
+        address: null,
+        battery_level: null,
+        cellular_dbm: null,
+        cellular_network_type: null,
+        cellular_operator: null,
+        wifi_access_points: null,
+      };
+
+      mockPrisma.deviceLatest.upsert.mockResolvedValue({});
+
+      await updateDeviceLatestCritical(
+        '863257063350583',
+        'A571992',
+        Date.now(),
+        sensorPayload,
+        locationPayload
       );
-      // Should NOT contain ON CONFLICT anymore
-      expect(mockPool.query).toHaveBeenCalledWith(
-        expect.not.stringContaining('ON CONFLICT'),
-        expect.anything()
-      );
+
+      expect(mockPrisma.deviceLatest.upsert).toHaveBeenCalledWith({
+        where: { deviceImei: '863257063350583' },
+        create: expect.any(Object),
+        update: expect.any(Object),
+      });
+    });
+  });
+
+  describe('updateDeviceLatestReferences', () => {
+    it('should update device latest references', async () => {
+      mockPrisma.deviceLatest.update.mockResolvedValue({});
+
+      await updateDeviceLatestReferences('863257063350583', 1, 2);
+
+      expect(mockPrisma.deviceLatest.update).toHaveBeenCalledWith({
+        where: { deviceImei: '863257063350583' },
+        data: {
+          latestTelemetryId: 1,
+          latestLocationId: 2,
+        },
+      });
+    });
+  });
+
+  describe('updateDeviceLatest', () => {
+    it('should update device latest references (backward compatibility)', async () => {
+      mockPrisma.deviceLatest.update.mockResolvedValue({});
+
+      await updateDeviceLatest('863257063350583', 'A571992', Date.now(), 1, 2);
+
+      expect(mockPrisma.deviceLatest.update).toHaveBeenCalledWith({
+        where: { deviceImei: '863257063350583' },
+        data: {
+          latestTelemetryId: 1,
+          latestLocationId: 2,
+        },
+      });
     });
   });
 
   describe('checkDatabaseHealth', () => {
     it('should return true when database is healthy', async () => {
-      mockPool.query.mockResolvedValue({ rows: [{ '?column?': 1 }] });
+      mockPrisma.$queryRaw.mockResolvedValue([{ '?column?': 1 }]);
 
       const result = await checkDatabaseHealth();
 
       expect(result).toBe(true);
+      expect(mockPrisma.$queryRaw).toHaveBeenCalled();
     });
 
     it('should return false when database is unhealthy', async () => {
-      mockPool.query.mockRejectedValue(new Error('Connection failed'));
+      mockPrisma.$queryRaw.mockRejectedValue(new Error('Connection failed'));
 
       const result = await checkDatabaseHealth();
 
@@ -157,37 +348,24 @@ describe('Database Functions', () => {
   });
 
   describe('withTransaction', () => {
-    it('should commit transaction on success', async () => {
-      const mockClient = {
-        query: jest.fn().mockResolvedValue({ rows: [] }),
-        release: jest.fn(),
-      };
-
-      mockPool.connect.mockResolvedValue(mockClient);
-
+    it('should execute transaction callback', async () => {
       const callback = jest.fn().mockResolvedValue('result');
+      mockPrisma.$transaction.mockImplementation(async (cb) => {
+        return await cb(mockPrisma);
+      });
 
       const result = await withTransaction(callback);
 
       expect(result).toBe('result');
-      expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
-      expect(mockClient.query).toHaveBeenCalledWith('COMMIT');
-      expect(mockClient.release).toHaveBeenCalled();
+      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      expect(callback).toHaveBeenCalledWith(mockPrisma);
     });
 
-    it('should rollback transaction on error', async () => {
-      const mockClient = {
-        query: jest.fn().mockResolvedValue({ rows: [] }),
-        release: jest.fn(),
-      };
-
-      mockPool.connect.mockResolvedValue(mockClient);
-
+    it('should handle transaction errors', async () => {
       const callback = jest.fn().mockRejectedValue(new Error('Test error'));
+      mockPrisma.$transaction.mockRejectedValue(new Error('Test error'));
 
       await expect(withTransaction(callback)).rejects.toThrow('Test error');
-      expect(mockClient.query).toHaveBeenCalledWith('ROLLBACK');
-      expect(mockClient.release).toHaveBeenCalled();
     });
   });
 });

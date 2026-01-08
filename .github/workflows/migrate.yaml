@@ -1,0 +1,41 @@
+name: Database Migrations
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'prisma/**'
+      - '.github/workflows/migrate.yaml'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Generate Prisma Client
+      run: npm run db:generate
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+    - name: Run database migrations
+      run: npm run db:migrate:deploy
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+    - name: Verify migration
+      run: npx prisma migrate status
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}

@@ -1,54 +1,29 @@
 /**
  * Database connection and helper functions
- * Uses PostgreSQL with connection pooling for scalability
+ * Uses Prisma ORM for type-safe database operations
  */
 
-import { Pool, PoolClient } from 'pg';
+import { PrismaClient } from '@prisma/client';
 import { PaxafeSensorPayload, PaxafeLocationPayload } from '@/types/paxafe';
 import { TivePayload } from '@/types/tive';
 import { logger } from '@/lib/logger';
-import { config } from '@/lib/config';
 
-// Helper function to determine if SSL is needed
-function getSslConfig() {
-  const dbUrl = process.env.DATABASE_URL || '';
+// Prisma Client singleton pattern for Next.js
+// Prevents multiple instances in development with hot reloading
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
 
-  if (dbUrl.includes('supabase') || 
-      dbUrl.includes('neon.tech') || 
-      dbUrl.includes('railway') ||
-      dbUrl.includes('sslmode=require') ||
-      process.env.NODE_ENV === 'production') {
-    return { rejectUnauthorized: false };
-  }
-
-  return false;
-}
-
-// Initialize connection pool
-const pool = new Pool({
-  connectionString: config.databaseUrl, // Use config instead
-  ssl: getSslConfig(),
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000, 
-});
-
-
-pool.on('error', (err) => {
-  logger.error('Unexpected database pool error', {
-    error: err.message,
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   });
-});
 
-pool.on('connect', (client) => {
-  logger.debug('New database client connected', {
-    totalCount: pool.totalCount,
-    idleCount: pool.idleCount,
-  });
-});
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
-
-export { pool };
+// Export prisma for direct access if needed
+export { prisma as db };
 
 /**
  * Store raw webhook payload for audit trail
@@ -59,24 +34,17 @@ export async function storeRawPayload(
   status: 'pending' | 'failed' = 'pending',
   inngestEventId?: string
 ): Promise<number> {
-  const query = `
-    INSERT INTO raw_webhook_payloads (
-      payload, source, status, validation_errors, inngest_event_id
-    ) VALUES ($1, $2, $3, $4, $5)
-    RETURNING id
-  `;
-
-  const values = [
-    JSON.stringify(payload),
-    'Tive',
-    status,
-    validationErrors ? JSON.stringify(validationErrors) : null,
-    inngestEventId || null,
-  ];
-
   try {
-    const result = await pool.query(query, values);
-    return result.rows[0].id;
+    const result = await prisma.rawWebhookPayload.create({
+      data: {
+        payload: payload as any, // Prisma Json type accepts any
+        source: 'Tive',
+        status,
+        validationErrors: validationErrors ? (validationErrors as any) : null,
+        inngestEventId: inngestEventId || null,
+      },
+    });
+    return result.id;
   } catch (error) {
     logger.error('Error storing raw payload', {
       error: error instanceof Error ? error.message : 'Unknown',
@@ -95,16 +63,24 @@ export async function updateRawPayloadStatus(
   status: 'processing' | 'completed' | 'failed',
   processingError?: string
 ): Promise<void> {
-  const query = `
-    UPDATE raw_webhook_payloads
-    SET status = $1,
-        processed_at = CURRENT_TIMESTAMP,
-        processing_error = $2
-        -- inngest_event_id is preserved (not updated, keeps existing value)
-    WHERE id = $3
-  `;
-
-  await pool.query(query, [status, processingError || null, payloadId]);
+  try {
+    await prisma.rawWebhookPayload.update({
+      where: { id: payloadId },
+      data: {
+        status,
+        processedAt: new Date(),
+        processingError: processingError || null,
+        // inngestEventId is preserved (not updated, keeps existing value)
+      },
+    });
+  } catch (error) {
+    logger.error('Error updating raw payload status', {
+      error: error instanceof Error ? error.message : 'Unknown',
+      payloadId,
+      status,
+    });
+    throw error;
+  }
 }
 
 /**
@@ -115,14 +91,11 @@ export async function updateRawPayloadInngestEventId(
   payloadId: number,
   inngestEventId: string
 ): Promise<void> {
-  const query = `
-    UPDATE raw_webhook_payloads
-    SET inngest_event_id = $1
-    WHERE id = $2
-  `;
-
   try {
-    await pool.query(query, [inngestEventId, payloadId]);
+    await prisma.rawWebhookPayload.update({
+      where: { id: payloadId },
+      data: { inngestEventId },
+    });
   } catch (error) {
     logger.error('Error updating raw payload inngest_event_id', {
       error: error instanceof Error ? error.message : 'Unknown',
@@ -138,33 +111,24 @@ export async function updateRawPayloadInngestEventId(
  * Stores all readings as historical data (allows duplicates with same timestamp)
  */
 export async function saveTelemetry(payload: PaxafeSensorPayload): Promise<number> {
-  const query = `
-    INSERT INTO telemetry (
-      device_id, device_imei, ts, provider, type,
-      temperature, humidity, light_level,
-      accelerometer_x, accelerometer_y, accelerometer_z, accelerometer_magnitude
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-    RETURNING id
-  `;
-
-  const values = [
-    payload.device_id,
-    payload.device_imei,
-    payload.timestamp,
-    payload.provider,
-    payload.type,
-    payload.temperature,
-    payload.humidity,
-    payload.light_level,
-    payload.accelerometer?.x ?? null,
-    payload.accelerometer?.y ?? null,
-    payload.accelerometer?.z ?? null,
-    payload.accelerometer?.magnitude ?? null,
-  ];
-
   try {
-    const result = await pool.query(query, values);
-    return result.rows[0].id;
+    const result = await prisma.telemetry.create({
+      data: {
+        deviceId: payload.device_id,
+        deviceImei: payload.device_imei,
+        ts: BigInt(payload.timestamp),
+        provider: payload.provider,
+        type: payload.type,
+        temperature: payload.temperature !== null ? payload.temperature : null,
+        humidity: payload.humidity !== null ? payload.humidity : null,
+        lightLevel: payload.light_level !== null ? payload.light_level : null,
+        accelerometerX: payload.accelerometer?.x ?? null,
+        accelerometerY: payload.accelerometer?.y ?? null,
+        accelerometerZ: payload.accelerometer?.z ?? null,
+        accelerometerMagnitude: payload.accelerometer?.magnitude ?? null,
+      },
+    });
+    return result.id;
   } catch (error) {
     logger.error('Error saving telemetry', {
       error: error instanceof Error ? error.message : 'Unknown',
@@ -179,47 +143,34 @@ export async function saveTelemetry(payload: PaxafeSensorPayload): Promise<numbe
  * Stores all readings as historical data (allows duplicates with same timestamp)
  */
 export async function saveLocation(payload: PaxafeLocationPayload): Promise<number> {
-  const query = `
-    INSERT INTO locations (
-      device_id, device_imei, ts, provider, type,
-      latitude, longitude, altitude,
-      location_accuracy, location_accuracy_category, location_source,
-      address_street, address_locality, address_state, address_country, 
-      address_postal_code, address_full_address,
-      battery_level, cellular_dbm, cellular_network_type, cellular_operator,
-      wifi_access_points
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-    RETURNING id
-  `;
-
-  const values = [
-    payload.device_id,
-    payload.device_imei,
-    payload.timestamp,
-    payload.provider,
-    payload.type,
-    payload.latitude,
-    payload.longitude,
-    payload.altitude,
-    payload.location_accuracy,
-    payload.location_accuracy_category,
-    payload.location_source,
-    payload.address?.street ?? null,
-    payload.address?.locality ?? null,
-    payload.address?.state ?? null,
-    payload.address?.country ?? null,
-    payload.address?.postal_code ?? null,
-    payload.address?.full_address ?? null,
-    payload.battery_level,
-    payload.cellular_dbm,
-    payload.cellular_network_type,
-    payload.cellular_operator,
-    payload.wifi_access_points,
-  ];
-
   try {
-    const result = await pool.query(query, values);
-    return result.rows[0].id;
+    const result = await prisma.location.create({
+      data: {
+        deviceId: payload.device_id,
+        deviceImei: payload.device_imei,
+        ts: BigInt(payload.timestamp),
+        provider: payload.provider,
+        type: payload.type,
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        altitude: payload.altitude ?? null,
+        locationAccuracy: payload.location_accuracy ?? null,
+        locationAccuracyCategory: payload.location_accuracy_category ?? null,
+        locationSource: payload.location_source ?? null,
+        addressStreet: payload.address?.street ?? null,
+        addressLocality: payload.address?.locality ?? null,
+        addressState: payload.address?.state ?? null,
+        addressCountry: payload.address?.country ?? null,
+        addressPostalCode: payload.address?.postal_code ?? null,
+        addressFullAddress: payload.address?.full_address ?? null,
+        batteryLevel: payload.battery_level ?? null,
+        cellularDbm: payload.cellular_dbm ?? null,
+        cellularNetworkType: payload.cellular_network_type ?? null,
+        cellularOperator: payload.cellular_operator ?? null,
+        wifiAccessPoints: payload.wifi_access_points ?? null,
+      },
+    });
+    return result.id;
   } catch (error) {
     logger.error('Error saving location', {
       error: error instanceof Error ? error.message : 'Unknown',
@@ -241,89 +192,72 @@ export async function updateDeviceLatestCritical(
   sensorPayload: PaxafeSensorPayload,
   locationPayload: PaxafeLocationPayload
 ): Promise<void> {
-  const query = `
-    INSERT INTO device_latest (
-      device_imei, device_id, provider, last_ts,
-      -- Critical sensor fields (updated synchronously)
-      last_temperature, last_humidity, last_light_level,
-      last_accelerometer_x, last_accelerometer_y, last_accelerometer_z, last_accelerometer_magnitude,
-      -- Critical location fields (updated synchronously)
-      last_lat, last_lon, last_altitude,
-      location_accuracy, location_accuracy_category, location_source,
-      address_street, address_locality, address_state, address_country, address_postal_code, address_full_address,
-      -- Critical device status (updated synchronously)
-      battery_level, cellular_dbm, cellular_network_type, cellular_operator, wifi_access_points,
-      updated_at
-    ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, CURRENT_TIMESTAMP
-    )
-    ON CONFLICT (device_imei) DO UPDATE SET
-      device_id = EXCLUDED.device_id,
-      last_ts = EXCLUDED.last_ts,
-      -- Update critical fields synchronously
-      last_temperature = EXCLUDED.last_temperature,
-      last_humidity = EXCLUDED.last_humidity,
-      last_light_level = EXCLUDED.last_light_level,
-      last_accelerometer_x = EXCLUDED.last_accelerometer_x,
-      last_accelerometer_y = EXCLUDED.last_accelerometer_y,
-      last_accelerometer_z = EXCLUDED.last_accelerometer_z,
-      last_accelerometer_magnitude = EXCLUDED.last_accelerometer_magnitude,
-      last_lat = EXCLUDED.last_lat,
-      last_lon = EXCLUDED.last_lon,
-      last_altitude = EXCLUDED.last_altitude,
-      location_accuracy = EXCLUDED.location_accuracy,
-      location_accuracy_category = EXCLUDED.location_accuracy_category,
-      location_source = EXCLUDED.location_source,
-      address_street = EXCLUDED.address_street,
-      address_locality = EXCLUDED.address_locality,
-      address_state = EXCLUDED.address_state,
-      address_country = EXCLUDED.address_country,
-      address_postal_code = EXCLUDED.address_postal_code,
-      address_full_address = EXCLUDED.address_full_address,
-      battery_level = EXCLUDED.battery_level,
-      cellular_dbm = EXCLUDED.cellular_dbm,
-      cellular_network_type = EXCLUDED.cellular_network_type,
-      cellular_operator = EXCLUDED.cellular_operator,
-      wifi_access_points = EXCLUDED.wifi_access_points,
-      updated_at = CURRENT_TIMESTAMP
-  `;
-
-  const values = [
-    deviceImei,
-    deviceId,
-    sensorPayload.provider,
-    timestamp,
-    // Sensor data
-    sensorPayload.temperature,
-    sensorPayload.humidity,
-    sensorPayload.light_level,
-    sensorPayload.accelerometer?.x ?? null,
-    sensorPayload.accelerometer?.y ?? null,
-    sensorPayload.accelerometer?.z ?? null,
-    sensorPayload.accelerometer?.magnitude ?? null,
-    // Location data
-    locationPayload.latitude,
-    locationPayload.longitude,
-    locationPayload.altitude,
-    locationPayload.location_accuracy,
-    locationPayload.location_accuracy_category,
-    locationPayload.location_source,
-    locationPayload.address?.street ?? null,
-    locationPayload.address?.locality ?? null,
-    locationPayload.address?.state ?? null,
-    locationPayload.address?.country ?? null,
-    locationPayload.address?.postal_code ?? null,
-    locationPayload.address?.full_address ?? null,
-    // Device status
-    locationPayload.battery_level,
-    locationPayload.cellular_dbm,
-    locationPayload.cellular_network_type,
-    locationPayload.cellular_operator,
-    locationPayload.wifi_access_points,
-  ];
-
   try {
-    await pool.query(query, values);
+    await prisma.deviceLatest.upsert({
+      where: { deviceImei },
+      create: {
+        deviceImei,
+        deviceId,
+        provider: sensorPayload.provider,
+        lastTs: BigInt(timestamp),
+        // Critical sensor fields (updated synchronously)
+        lastTemperature: sensorPayload.temperature ?? null,
+        lastHumidity: sensorPayload.humidity ?? null,
+        lastLightLevel: sensorPayload.light_level ?? null,
+        lastAccelerometerX: sensorPayload.accelerometer?.x ?? null,
+        lastAccelerometerY: sensorPayload.accelerometer?.y ?? null,
+        lastAccelerometerZ: sensorPayload.accelerometer?.z ?? null,
+        lastAccelerometerMagnitude: sensorPayload.accelerometer?.magnitude ?? null,
+        // Critical location fields (updated synchronously)
+        lastLat: locationPayload.latitude ?? null,
+        lastLon: locationPayload.longitude ?? null,
+        lastAltitude: locationPayload.altitude ?? null,
+        locationAccuracy: locationPayload.location_accuracy ?? null,
+        locationAccuracyCategory: locationPayload.location_accuracy_category ?? null,
+        locationSource: locationPayload.location_source ?? null,
+        addressStreet: locationPayload.address?.street ?? null,
+        addressLocality: locationPayload.address?.locality ?? null,
+        addressState: locationPayload.address?.state ?? null,
+        addressCountry: locationPayload.address?.country ?? null,
+        addressPostalCode: locationPayload.address?.postal_code ?? null,
+        addressFullAddress: locationPayload.address?.full_address ?? null,
+        // Critical device status (updated synchronously)
+        batteryLevel: locationPayload.battery_level ?? null,
+        cellularDbm: locationPayload.cellular_dbm ?? null,
+        cellularNetworkType: locationPayload.cellular_network_type ?? null,
+        cellularOperator: locationPayload.cellular_operator ?? null,
+        wifiAccessPoints: locationPayload.wifi_access_points ?? null,
+      },
+      update: {
+        deviceId,
+        lastTs: BigInt(timestamp),
+        // Update critical fields synchronously
+        lastTemperature: sensorPayload.temperature ?? null,
+        lastHumidity: sensorPayload.humidity ?? null,
+        lastLightLevel: sensorPayload.light_level ?? null,
+        lastAccelerometerX: sensorPayload.accelerometer?.x ?? null,
+        lastAccelerometerY: sensorPayload.accelerometer?.y ?? null,
+        lastAccelerometerZ: sensorPayload.accelerometer?.z ?? null,
+        lastAccelerometerMagnitude: sensorPayload.accelerometer?.magnitude ?? null,
+        lastLat: locationPayload.latitude ?? null,
+        lastLon: locationPayload.longitude ?? null,
+        lastAltitude: locationPayload.altitude ?? null,
+        locationAccuracy: locationPayload.location_accuracy ?? null,
+        locationAccuracyCategory: locationPayload.location_accuracy_category ?? null,
+        locationSource: locationPayload.location_source ?? null,
+        addressStreet: locationPayload.address?.street ?? null,
+        addressLocality: locationPayload.address?.locality ?? null,
+        addressState: locationPayload.address?.state ?? null,
+        addressCountry: locationPayload.address?.country ?? null,
+        addressPostalCode: locationPayload.address?.postal_code ?? null,
+        addressFullAddress: locationPayload.address?.full_address ?? null,
+        batteryLevel: locationPayload.battery_level ?? null,
+        cellularDbm: locationPayload.cellular_dbm ?? null,
+        cellularNetworkType: locationPayload.cellular_network_type ?? null,
+        cellularOperator: locationPayload.cellular_operator ?? null,
+        wifiAccessPoints: locationPayload.wifi_access_points ?? null,
+      },
+    });
   } catch (error) {
     logger.error('Error updating device_latest (critical)', {
       error: error instanceof Error ? error.message : 'Unknown',
@@ -345,15 +279,14 @@ export async function updateDeviceLatestReferences(
   telemetryId: number,
   locationId: number
 ): Promise<void> {
-  const query = `
-    UPDATE device_latest
-    SET latest_telemetry_id = $1,
-        latest_location_id = $2
-    WHERE device_imei = $3
-  `;
-
   try {
-    await pool.query(query, [telemetryId, locationId, deviceImei]);
+    await prisma.deviceLatest.update({
+      where: { deviceImei },
+      data: {
+        latestTelemetryId: telemetryId,
+        latestLocationId: locationId,
+      },
+    });
   } catch (error) {
     logger.error('Error updating device_latest references', {
       error: error instanceof Error ? error.message : 'Unknown',
@@ -381,37 +314,17 @@ export async function updateDeviceLatest(
 }
 
 /**
- * Get database connection for transactions
- */
-export async function getClient(): Promise<PoolClient> {
-  return await pool.connect();
-}
-
-/**
- * Close database pool (for cleanup)
- */
-export async function closePool(): Promise<void> {
-  await pool.end();
-}
-
-/**
  * Execute multiple operations in a transaction
  */
 export async function withTransaction<T>(
-  callback: (client: PoolClient) => Promise<T>
+  callback: (
+    tx: Omit<
+      PrismaClient,
+      '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+    >
+  ) => Promise<T>
 ): Promise<T> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await callback(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  return (await prisma.$transaction(callback)) as T;
 }
 
 /**
@@ -419,18 +332,16 @@ export async function withTransaction<T>(
  */
 export async function checkDatabaseHealth(): Promise<boolean> {
   try {
-    await pool.query('SELECT 1');
+    await prisma.$queryRaw`SELECT 1`;
     return true;
   } catch {
     return false;
   }
 }
 
-// Add metrics export
-export function getPoolStats() {
-  return {
-    totalCount: pool.totalCount,
-    idleCount: pool.idleCount,
-    waitingCount: pool.waitingCount,
-  };
+/**
+ * Disconnect Prisma Client (for cleanup)
+ */
+export async function disconnect(): Promise<void> {
+  await prisma.$disconnect();
 }

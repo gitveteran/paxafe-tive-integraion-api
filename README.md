@@ -8,6 +8,7 @@ A production-ready Next.js integration API that receives Tive IoT device telemet
 - ✅ **Comprehensive Validation**: Validates payload structure, data types, and business rules
 - ✅ **Data Transformation**: Converts Tive payloads to PAXAFE sensor and location formats
 - ✅ **PostgreSQL Storage**: Normalized tables with raw payload audit trail
+- ✅ **Prisma ORM**: Type-safe database operations with automatic migrations
 - ✅ **Inngest Integration**: Async processing with automatic retries and DLQ
 - ✅ **Device Dashboard**: Real-time device state visualization
 - ✅ **Error Handling**: Categorized errors with retry logic and Tive notifications
@@ -77,15 +78,23 @@ cp env.example .env.local
 ```
 
 4. Set up PostgreSQL database
-```bash
-# Create database
-createdb paxafe_integration
 
-# Run migrations
-psql -d paxafe_integration -f src/lib/db/schema.sql
+**Using Prisma (Recommended):**
+```bash
+# Set DATABASE_URL in .env.local
+# For local: postgresql://user:password@localhost:5432/paxafe_integration
+# For Supabase/Neon: Use connection string from your provider
+
+# Generate Prisma Client
+npm run db:generate
+
+# Run migrations (creates all tables)
+npm run db:migrate
 ```
 
 Or use a managed PostgreSQL service (Neon, Supabase, etc.) and update `DATABASE_URL`.
+
+**Note:** This project uses Prisma ORM. The schema is defined in `prisma/schema.prisma`. See `SETUP.md` for detailed instructions.
 
 5. Set up Inngest
 
