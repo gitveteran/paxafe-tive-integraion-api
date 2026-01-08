@@ -10,14 +10,22 @@ npm install
 
 ### 2. Database Setup
 
+This project uses **Prisma ORM** for database management. The schema is defined in `prisma/schema.prisma`.
+
 #### Option A: Local PostgreSQL
 
 ```bash
 # Create database
 createdb paxafe_integration
 
-# Run schema
-psql -d paxafe_integration -f src/lib/db/schema.sql
+# Set DATABASE_URL in .env.local
+# DATABASE_URL=postgresql://user:password@localhost:5432/paxafe_integration
+
+# Generate Prisma Client
+npm run db:generate
+
+# Run migrations
+npm run db:migrate
 ```
 
 #### Option B: Managed PostgreSQL (Recommended)
@@ -33,6 +41,16 @@ psql -d paxafe_integration -f src/lib/db/schema.sql
    - Create a project
    - Get connection string from Settings > Database
    - Add to `.env.local` as `DATABASE_URL`
+
+After setting `DATABASE_URL`:
+
+```bash
+# Generate Prisma Client
+npm run db:generate
+
+# Run migrations (creates tables)
+npm run db:migrate
+```
 
 ### 3. Inngest Setup
 
@@ -98,7 +116,9 @@ Or use the sample payloads from the exercise folder.
 
 - Verify `DATABASE_URL` is correct
 - Check database is accessible
-- Verify schema has been run
+- Run `npm run db:generate` to generate Prisma Client
+- Run `npm run db:migrate` to apply migrations
+- Check Prisma migration status: `npx prisma migrate status`
 
 ### Webhook returns 401
 

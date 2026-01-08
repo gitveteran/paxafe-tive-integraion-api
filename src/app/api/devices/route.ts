@@ -4,7 +4,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { pool } from '@/lib/db';
+import { prisma } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { config } from '@/lib/config';
 import { successResponse, errorResponse } from '@/lib/api/response';
@@ -35,7 +35,39 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const query = `
+    // Fetch devices with relations using Prisma
+    // Use raw query for complex COALESCE logic to match original behavior
+    const devices = await prisma.$queryRaw<Array<{
+      device_imei: string;
+      device_id: string;
+      provider: string;
+      last_ts: bigint;
+      last_temperature: number | null;
+      last_humidity: number | null;
+      last_light_level: number | null;
+      last_accelerometer_x: number | null;
+      last_accelerometer_y: number | null;
+      last_accelerometer_z: number | null;
+      last_accelerometer_magnitude: number | null;
+      last_lat: number | null;
+      last_lon: number | null;
+      last_altitude: number | null;
+      location_accuracy: number | null;
+      location_accuracy_category: string | null;
+      location_source: string | null;
+      address_street: string | null;
+      address_locality: string | null;
+      address_state: string | null;
+      address_country: string | null;
+      address_postal_code: string | null;
+      address_full_address: string | null;
+      battery_level: number | null;
+      cellular_dbm: number | null;
+      cellular_network_type: string | null;
+      cellular_operator: string | null;
+      wifi_access_points: number | null;
+      updated_at: Date;
+    }>>`
       SELECT 
         dl.device_imei,
         dl.device_id,
@@ -74,20 +106,15 @@ export async function GET(request: NextRequest) {
       LEFT JOIN telemetry t ON dl.latest_telemetry_id = t.id
       LEFT JOIN locations l ON dl.latest_location_id = l.id
       ORDER BY dl.updated_at DESC
-      LIMIT $1
+      LIMIT ${limit}
     `;
 
-    // Add timeout wrapper
-    const queryPromise = pool.query(query, [limit]);
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Query timeout')), 30000)
-    );
-
-    const result = await Promise.race([queryPromise, timeoutPromise]) as any;
-
     return successResponse({
-      count: result.rows.length,
-      devices: result.rows,
+      count: devices.length,
+      devices: devices.map(device => ({
+        ...device,
+        last_ts: Number(device.last_ts), // Convert BigInt to number for JSON serialization
+      })),
     });
 
   } catch (error) {

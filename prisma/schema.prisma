@@ -1,0 +1,147 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Raw webhook payloads table (audit trail, not normalized)
+// Acts as audit log and can be used for reprocessing
+model RawWebhookPayload {
+  id                Int       @id @default(autoincrement())
+  payload           Json      @db.JsonB
+  source            String    @default("Tive") @db.VarChar(50)
+  status            String    @default("pending") @db.VarChar(20) // pending, processing, completed, failed
+  inngestEventId    String?   @map("inngest_event_id") @db.VarChar(255) // Link to Inngest event for tracking
+  validationErrors  Json?     @map("validation_errors") @db.JsonB
+  processingError   String?   @map("processing_error") @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at")
+  processedAt       DateTime? @map("processed_at")
+
+  @@index([status, createdAt], name: "idx_raw_payloads_status_created")
+  @@index([source], name: "idx_raw_payloads_source")
+  @@index([inngestEventId], name: "idx_raw_payloads_inngest_event")
+  @@map("raw_webhook_payloads")
+}
+
+// Normalized telemetry table (sensor readings)
+// Optimized for time-series queries, stores all historical readings
+// Allows multiple readings with the same timestamp
+model Telemetry {
+  id                    Int      @id @default(autoincrement())
+  deviceImei            String   @map("device_imei") @db.VarChar(15)
+  deviceId             String   @map("device_id") @db.VarChar(255)
+  ts                   BigInt   // Timestamp as BIGINT
+  provider             String   @default("Tive") @db.VarChar(50)
+  type                 String   @default("Active") @db.VarChar(50)
+  temperature          Decimal? @db.Decimal(5, 2)
+  humidity             Decimal? @db.Decimal(4, 1)
+  lightLevel           Decimal? @map("light_level") @db.Decimal(8, 1)
+  accelerometerX       Decimal? @map("accelerometer_x") @db.Decimal(6, 3)
+  accelerometerY       Decimal? @map("accelerometer_y") @db.Decimal(6, 3)
+  accelerometerZ       Decimal? @map("accelerometer_z") @db.Decimal(6, 3)
+  accelerometerMagnitude Decimal? @map("accelerometer_magnitude") @db.Decimal(6, 3)
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  // Relations
+  deviceLatest         DeviceLatest? @relation("LatestTelemetry")
+
+  @@index([deviceImei], name: "idx_telemetry_device_imei")
+  @@index([ts(sort: Desc)], name: "idx_telemetry_timestamp")
+  @@index([deviceImei, ts(sort: Desc)], name: "idx_telemetry_device_timestamp")
+  @@index([provider], name: "idx_telemetry_provider")
+  @@map("telemetry")
+}
+
+// Normalized locations table (location readings)
+// Optimized for time-series queries, stores all historical readings
+// Allows multiple readings with the same timestamp
+model Location {
+  id                    Int      @id @default(autoincrement())
+  deviceImei            String   @map("device_imei") @db.VarChar(15)
+  deviceId              String   @map("device_id") @db.VarChar(255)
+  ts                    BigInt   // Timestamp as BIGINT
+  provider              String   @default("Tive") @db.VarChar(50)
+  type                  String   @default("Active") @db.VarChar(50)
+  latitude              Decimal  @db.Decimal(10, 8)
+  longitude             Decimal  @db.Decimal(11, 8)
+  altitude              Decimal? @db.Decimal(8, 2)
+  locationAccuracy      Int?     @map("location_accuracy")
+  locationAccuracyCategory String? @map("location_accuracy_category") @db.VarChar(10)
+  locationSource        String?  @map("location_source") @db.VarChar(50)
+  addressStreet         String?  @map("address_street") @db.Text
+  addressLocality        String?  @map("address_locality") @db.VarChar(255)
+  addressState          String?  @map("address_state") @db.VarChar(100)
+  addressCountry        String?  @map("address_country") @db.VarChar(100)
+  addressPostalCode     String?  @map("address_postal_code") @db.VarChar(20)
+  addressFullAddress    String?  @map("address_full_address") @db.Text
+  batteryLevel          Int?     @map("battery_level")
+  cellularDbm           Decimal? @map("cellular_dbm") @db.Decimal(6, 2)
+  cellularNetworkType   String?  @map("cellular_network_type") @db.VarChar(50)
+  cellularOperator      String?  @map("cellular_operator") @db.VarChar(100)
+  wifiAccessPoints      Int?     @map("wifi_access_points")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  // Relations
+  deviceLatest          DeviceLatest? @relation("LatestLocation")
+
+  @@index([deviceImei], name: "idx_location_device_imei")
+  @@index([ts(sort: Desc)], name: "idx_location_timestamp")
+  @@index([deviceImei, ts(sort: Desc)], name: "idx_location_device_timestamp")
+  @@index([latitude, longitude], name: "idx_location_coordinates")
+  @@index([provider], name: "idx_location_provider")
+  @@map("locations")
+}
+
+// Device latest state table (optimized for dashboard queries)
+// Hybrid approach:
+// - Critical fields stored directly for fast synchronous updates (real-time dashboard)
+// - References updated asynchronously for consistency and audit trail
+model DeviceLatest {
+  deviceImei                String   @id @map("device_imei") @db.VarChar(15)
+  deviceId                  String   @map("device_id") @db.VarChar(255)
+  provider                  String   @default("Tive") @db.VarChar(50)
+  lastTs                    BigInt   @map("last_ts")
+  // Critical fields (updated synchronously for real-time dashboard)
+  lastTemperature          Decimal? @map("last_temperature") @db.Decimal(5, 2)
+  lastHumidity             Decimal? @map("last_humidity") @db.Decimal(4, 1)
+  lastLightLevel           Decimal? @map("last_light_level") @db.Decimal(8, 1)
+  lastAccelerometerX       Decimal? @map("last_accelerometer_x") @db.Decimal(6, 3)
+  lastAccelerometerY       Decimal? @map("last_accelerometer_y") @db.Decimal(6, 3)
+  lastAccelerometerZ       Decimal? @map("last_accelerometer_z") @db.Decimal(6, 3)
+  lastAccelerometerMagnitude Decimal? @map("last_accelerometer_magnitude") @db.Decimal(6, 3)
+  lastLat                  Decimal? @map("last_lat") @db.Decimal(10, 8)
+  lastLon                  Decimal? @map("last_lon") @db.Decimal(11, 8)
+  lastAltitude             Decimal? @map("last_altitude") @db.Decimal(8, 2)
+  locationAccuracy         Int?     @map("location_accuracy")
+  locationAccuracyCategory String?  @map("location_accuracy_category") @db.VarChar(10)
+  locationSource           String?  @map("location_source") @db.VarChar(50)
+  addressStreet            String?  @map("address_street") @db.Text
+  addressLocality          String?  @map("address_locality") @db.VarChar(255)
+  addressState             String?  @map("address_state") @db.VarChar(100)
+  addressCountry           String?  @map("address_country") @db.VarChar(100)
+  addressPostalCode        String?  @map("address_postal_code") @db.VarChar(20)
+  addressFullAddress       String?  @map("address_full_address") @db.Text
+  batteryLevel             Int?     @map("battery_level")
+  cellularDbm              Decimal? @map("cellular_dbm") @db.Decimal(6, 2)
+  cellularNetworkType      String?  @map("cellular_network_type") @db.VarChar(50)
+  cellularOperator         String?  @map("cellular_operator") @db.VarChar(100)
+  wifiAccessPoints         Int?     @map("wifi_access_points")
+  // References to latest records (updated asynchronously for consistency)
+  latestTelemetryId        Int?     @unique @map("latest_telemetry_id")
+  latestLocationId         Int?     @unique @map("latest_location_id")
+  updatedAt                DateTime @default(now()) @updatedAt @map("updated_at")
+
+  // Relations (one-to-one: each DeviceLatest references one Telemetry and one Location)
+  latestTelemetry          Telemetry? @relation("LatestTelemetry", fields: [latestTelemetryId], references: [id], onDelete: SetNull)
+  latestLocation           Location?  @relation("LatestLocation", fields: [latestLocationId], references: [id], onDelete: SetNull)
+
+  @@index([updatedAt(sort: Desc)], name: "idx_device_latest_updated")
+  @@index([provider], name: "idx_device_latest_provider")
+  @@map("device_latest")
+}
